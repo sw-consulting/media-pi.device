@@ -3,7 +3,8 @@ set -euo pipefail
 
 ### --- CONFIG: set these for your environment ---
 CORE_API_BASE="http://192.168.11.140:8080/api"
-GATEWAY_HOST="gateway.example.com"     # your public gateway host
+GATEWAY_HOST="gateway.example.com"     # public gateway host
+GATEWAY_PORT="22"                      # public gateway port
 GATEWAY_USER="tunnel"                  # restricted user on the gateway (no shell)
 SSH_USER_ON_PI="pi"                    # account Cockpit will use to manage services
 ### ---------------------------------------------
@@ -86,6 +87,7 @@ ExecStart=/bin/sh -lc '\
     -o "ServerAliveInterval=30" -o "ServerAliveCountMax=3" \
     -o "ExitOnForwardFailure=yes" -o "StrictHostKeyChecking=accept-new" \
     -R /run/mediapi/${DEVICE_ID}.ssh.sock:127.0.0.1:22 \
+    -p ${GATEWAY_PORT} \
     ${GATEWAY_USER}@${GATEWAY_HOST} \
 '
 Restart=always
