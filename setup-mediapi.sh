@@ -55,6 +55,13 @@ RESP=$(
 echo "Enroll response: ${RESP}"
 
 # Persist device_id for the reverse-ssh service
+
+# Reconfigure and reinstall reverse-ssh service
+systemctl stop reverse-ssh.service || true
+systemctl disable reverse-ssh.service || true
+rm -f /etc/systemd/system/reverse-ssh.service
+rm -f /etc/default/reverse-ssh
+
 install -d -m 0755 /etc/mediapi
 echo -n "${DEVICE_ID}" > /etc/mediapi/device_id
 
