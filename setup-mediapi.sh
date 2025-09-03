@@ -38,7 +38,7 @@ echo "Derived deviceId: ${DEVICE_ID}"
 
 # Prepare metadata
 HOSTNAME=$(hostname)
-OS_NAME=$(grep -oP '(?<=^PRETTY_NAME=).+' /etc/os-release | tr -d '"')
+# OS_NAME=$(grep -oP '(?<=^PRETTY_NAME=).+' /etc/os-release | tr -d '"')
 PUBKEY_CONTENT=$(cat "${PUBKEY_PATH}")
 
 # Enroll / register (idempotent upsert)
@@ -70,6 +70,7 @@ echo -n "${DEVICE_ID}" > /etc/mediapi/device_id
 cat >/etc/default/reverse-ssh <<EOF
 GATEWAY_HOST="${GATEWAY_HOST}"
 GATEWAY_USER="${GATEWAY_USER}"
+GATEWAY_PORT="${GATEWAY_PORT}"
 EOF
 
 cat >/etc/systemd/system/reverse-ssh.service <<'EOF'
