@@ -1,3 +1,6 @@
+# Copyright (c) 2025 sw.consulting
+# This file is a part of Media Pi frontend application
+
 name: lint
 
 on:
@@ -12,7 +15,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ludeeus/action-shellcheck@2.0.0
-        with:
-          ignore_paths: tests/shunit2
         env:
           SHELLCHECK_OPTS: -x

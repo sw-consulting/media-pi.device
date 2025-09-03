@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025 sw.consulting
+# This file is a part of Media Pi frontend application
+
 set -euo pipefail
 
 ### --- CONFIG: set these for your environment ---
