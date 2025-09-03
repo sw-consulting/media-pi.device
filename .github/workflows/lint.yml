@@ -1,0 +1,19 @@
+# Copyright (c) 2025 sw.consulting
+# This file is a part of Media Pi frontend application
+
+name: lint
+
+on:
+  pull_request:
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'
+  cancel-in-progress: true    
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ludeeus/action-shellcheck@2.0.0
+        env:
+          SHELLCHECK_OPTS: -x
