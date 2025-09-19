@@ -4,9 +4,14 @@
 
 set -euo pipefail
 
-### --- CONFIG: set these for your environment ---
-CORE_API_BASE="http://192.168.11.140:8080/api"
-SSH_USER_ON_PI="pi"                    # account to be used use to access agent
+### --- CONFIG: can be set via environment variables ---
+# You can override these by setting them in the shell before running the script,
+# for example:
+#   CORE_API_BASE="https://example.com/api"  sudo /usr/local/bin/setup-media-pi.sh
+# or (if already root):
+#   CORE_API_BASE="https://example.com/api"  /usr/local/bin/setup-media-pi.sh
+CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8080/api}"
+SSH_USER_ON_PI="pi"  # user on the device under which the agent runs, shall match mkdeb.sh postinst
 ### ---------------------------------------------
 
 SSH_KEY_PATH="/home/${SSH_USER_ON_PI}/.ssh"

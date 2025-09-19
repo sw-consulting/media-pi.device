@@ -141,7 +141,7 @@ getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || t
 # Если хотите автоматически добавлять пользователя 'pi' в эту группу,
 # можно раскомментировать следующую строку (по соображениям безопасности
 # это оставлено на усмотрение администратора):
-# id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
+id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"
