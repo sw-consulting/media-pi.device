@@ -21,7 +21,7 @@ type Config struct {
 }
 
 func loadConfig() (map[string]struct{}, error) {
-	b, err := os.ReadFile("/etc/pi-sdctl/agent.yaml")
+	b, err := os.ReadFile("/etc/media-pi-agent/agent.yaml")
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func main() {
 	log.SetFlags(0)
 
 	if len(os.Args) < 2 {
-		fmt.Println(`Usage: pi-sdctl <list|status|start|stop|restart|enable|disable> [unit]`)
+		fmt.Println(`Usage: media-pi-agent <list|status|start|stop|restart|enable|disable> [unit]`)
 		os.Exit(2)
 	}
 

@@ -7,35 +7,32 @@ set -euo pipefail
 # mkdeb.sh ARCH VERSION BIN_PATH
 # ARCH: armhf | arm64
 # VERSION: e.g. 0.1.0
-# BIN_PATH: path to compiled pi-sdctl for this arch
+# BIN_PATH: path to compiled media-pi-agent for this arch
 
 ARCH="${1:?arch}"
 VERSION="${2:?version}"
 BIN="${3:?bin path}"
 
-PKG=pi-sdctl
+PKG=media-pi-agent
 WORK=build/deb/${PKG}_${VERSION}_${ARCH}
 ROOT="${WORK}"
 
 # Clean staging
 rm -rf "${WORK}"
 mkdir -p "${ROOT}/usr/local/bin"
-mkdir -p "${ROOT}/etc/pi-sdctl"
+mkdir -p "${ROOT}/etc/media-pi-agent"
 mkdir -p "${ROOT}/etc/polkit-1/rules.d"
 mkdir -p "${WORK}/DEBIAN"
 
 # Copy payload
-install -m 0755 "${BIN}" "${ROOT}/usr/local/bin/pi-sdctl"
-install -m 0644 packaging/agent.yaml "${ROOT}/etc/pi-sdctl/agent.yaml"
-install -m 0644 packaging/90-pi-sdctl.rules "${ROOT}/etc/polkit-1/rules.d/90-pi-sdctl.rules"
-
-ls -l "${ROOT}/etc/pi-sdctl"
-ls -l "${ROOT}/etc/polkit-1/rules.d"  
+install -m 0755 "${BIN}" "${ROOT}/usr/local/bin/media-pi-agent"
+install -m 0644 packaging/agent.yaml "${ROOT}/etc/media-pi-agent/agent.yaml"
+install -m 0644 packaging/90-media-pi-agent.rules "${ROOT}/etc/polkit-1/rules.d/90-media-pi-agent.rules"
 
 # Mark config files so dpkg keeps local edits
 cat > "${WORK}/DEBIAN/conffiles" <<EOF
-/etc/pi-sdctl/agent.yaml
-/etc/polkit-1/rules.d/90-pi-sdctl.rules
+/etc/media-pi-agent/agent.yaml
+/etc/polkit-1/rules.d/90-media-pi-agent.rules
 EOF
 
 # Control file
@@ -45,10 +42,10 @@ Version: ${VERSION}
 Section: admin
 Priority: optional
 Architecture: ${ARCH}
-Maintainer: Maxim Samsonov <maxirmx@sw.consulting   >
+Maintainer: Maxim Samsonov <maxirmx@sw.consulting>
 Depends: dbus, policykit-1, systemd
-Description: Systemd control agent via D-Bus for Raspberry Pi
- Provides pi-sdctl CLI to list/status/start/stop whitelisted units via system bus.
+Description: Media Pi agent via D-Bus for Raspberry Pi
+ Provides media-pi-agent CLI to list/status/start/stop whitelisted units via system bus.
 EOF
 
 # Postinst: ensure optional group exists (non-fatal if already there)
