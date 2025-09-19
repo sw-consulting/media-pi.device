@@ -169,7 +169,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-all/**/media-pi-agent
             dist-all/**/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
