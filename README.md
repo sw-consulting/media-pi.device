@@ -1,6 +1,9 @@
 # media-pi.device
 Media Pi agent application and device setup scripts
 
+[![Build & Package media-pi-agent](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml)
+[![Lint](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml)
+
 ## Установка
 1) Скачайте дистрибутив программного обеспечения, например, в `/tmp/media-pi-agent.deb`
 
