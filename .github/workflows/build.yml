@@ -127,12 +127,16 @@ jobs:
         run: |
           set -euxo pipefail
           PKGFILE=$(ls debs/*.deb | head -n1)
-          echo "Testing package: $PKGFILE"
-          docker run --rm --platform linux/arm64 -v "${PKGFILE}":/pkgs/pkg.deb:ro ubuntu:24.04 bash -xe -o pipefail <<'BASH'
+          ABS_PKGFILE=$(readlink -f "$PKGFILE" || realpath "$PKGFILE")
+          PKGDIR=$(dirname "$ABS_PKGFILE")
+          BASENAME=$(basename "$ABS_PKGFILE")
+          echo "Testing package: $ABS_PKGFILE"
+          # Mount the directory; inside container reference /pkgs/$BASENAME
+          docker run --rm --platform linux/arm64 -v "$PKGDIR":/pkgs:ro ubuntu:24.04 bash -xe -o pipefail <<'BASH'
             set -euo pipefail
             apt-get update -y
             apt-get install -y --no-install-recommends dpkg coreutils
-            dpkg -i /pkgs/pkg.deb || true
+            dpkg -i /pkgs/$BASENAME || true
             test -f /usr/local/bin/media-pi-agent
             test -x /usr/local/bin/media-pi-agent
             test -f /usr/local/bin/setup-media-pi.sh
