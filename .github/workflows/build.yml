@@ -60,9 +60,6 @@ jobs:
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
-        with:
-          version: v1.59.0
-          args: --timeout=5m
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
