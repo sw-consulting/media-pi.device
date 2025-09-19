@@ -10,7 +10,7 @@ set -euo pipefail
 #   CORE_API_BASE="https://example.com/api"  sudo /usr/local/bin/setup-media-pi.sh
 # or (if already root):
 #   CORE_API_BASE="https://example.com/api"  /usr/local/bin/setup-media-pi.sh
-CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8080/api}"
+CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8086/api}"
 SSH_USER_ON_PI="pi"  # user on the device under which the agent runs, shall match mkdeb.sh postinst
 ### ---------------------------------------------
 
