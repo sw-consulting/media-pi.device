@@ -78,7 +78,7 @@ if [ ${#services[@]} -gt 0 ]; then
 	for svc in "${services[@]}"; do
 		# На всякий случай экранируем двойные кавычки в названиях
 		esc="${svc//\"/\\\"}"
-		allowed_js+="\"${esc}\"," 
+		allowed_js+="\"${esc}\","
 	done
 	# Удаляем последний разделитель и закрываем массив
 	allowed_js="${allowed_js%, }]"
