@@ -37,6 +37,11 @@ jobs:
         with:
           go-version: '1.25.1'
 
+      - name: Run unit tests
+        if: matrix.target.name == 'arm64'
+        run: |
+          go test ./...
+
       - name: Build agent
         run: |
           mkdir -p dist/${{ matrix.target.name }}

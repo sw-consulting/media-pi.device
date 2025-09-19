@@ -21,7 +21,12 @@ type Config struct {
 }
 
 func loadConfig() (map[string]struct{}, error) {
-	b, err := os.ReadFile("/etc/media-pi-agent/agent.yaml")
+	return loadConfigFrom("/etc/media-pi-agent/agent.yaml")
+}
+
+// loadConfigFrom читает конфигурацию из указанного пути (useful for tests)
+func loadConfigFrom(path string) (map[string]struct{}, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
