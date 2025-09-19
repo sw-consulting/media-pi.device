@@ -15,7 +15,7 @@ BIN="${3:?bin path}"
 
 PKG=pi-sdctl
 WORK=build/deb/${PKG}_${VERSION}_${ARCH}
-ROOT="${WORK}/root"
+ROOT="${WORK}"
 
 # Clean staging
 rm -rf "${WORK}"
@@ -45,7 +45,7 @@ Version: ${VERSION}
 Section: admin
 Priority: optional
 Architecture: ${ARCH}
-Maintainer: Maxim Samsonov <maxirmx@sw.consulting>
+Maintainer: Maxim Samsonov <maxirmx@sw.consulting   >
 Depends: dbus, policykit-1, systemd
 Description: Systemd control agent via D-Bus for Raspberry Pi
  Provides pi-sdctl CLI to list/status/start/stop whitelisted units via system bus.
