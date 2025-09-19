@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: error
 
   package:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-latest
     needs: build
     strategy:
       fail-fast: false
@@ -107,8 +107,8 @@ jobs:
           if-no-files-found: error
 
   integration-test:
-    name: Integration test
-    runs-on: ubuntu-24.04-arm64
+    name: Integration test (arm64 via QEMU)
+    runs-on: ubuntu-latest
     needs: package
     steps:
       - name: Download arm64 deb artifact
@@ -120,36 +120,40 @@ jobs:
       - name: List downloaded files
         run: ls -l debs
 
-      - name: Install package & run checks
+      - name: Set up QEMU emulation for ARM
+        uses: docker/setup-qemu-action@v3
+
+      - name: Run integration tests in arm64 container
         run: |
           set -euxo pipefail
           PKGFILE=$(ls debs/*.deb | head -n1)
-          echo "Installing $PKGFILE"
-          sudo apt-get update -y
-          sudo dpkg -i "$PKGFILE" || true
-          test -f /usr/local/bin/media-pi-agent
-          test -x /usr/local/bin/media-pi-agent
-          test -f /usr/local/bin/setup-media-pi.sh
-          test -x /usr/local/bin/setup-media-pi.sh
-          test -f /etc/media-pi-agent/agent.yaml
-          test -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
-          set +e
-          ok=0
-          for flag in --help -h --version -v; do
-            if /usr/local/bin/media-pi-agent "$flag" >/tmp/agent.out 2>&1; then
-              echo "agent responded to $flag"; ok=1; break; fi
-          done
-          set -e
-          if [ $ok -ne 1 ]; then
-            echo "Agent did not respond to any help/version flag" >&2
-            /usr/local/bin/media-pi-agent --help || true
-            exit 2
-          fi
-          echo "Integration (arm64) checks passed"
+          echo "Testing package: $PKGFILE"
+          docker run --rm --platform linux/arm64 -v "${PKGFILE}":/pkgs/pkg.deb:ro ubuntu:24.04 bash -xe -o pipefail <<'BASH'
+            set -euo pipefail
+            apt-get update -y
+            apt-get install -y --no-install-recommends dpkg coreutils
+            dpkg -i /pkgs/pkg.deb || true
+            test -f /usr/local/bin/media-pi-agent
+            test -x /usr/local/bin/media-pi-agent
+            test -f /usr/local/bin/setup-media-pi.sh
+            test -x /usr/local/bin/setup-media-pi.sh
+            test -f /etc/media-pi-agent/agent.yaml
+            test -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
+            tried=0
+            for flag in --help -h --version -v; do
+              if /usr/local/bin/media-pi-agent "$flag" >/tmp/agent.out 2>&1; then
+                echo "agent responded successfully to $flag"; tried=1; break; fi
+            done
+            if [ "$tried" -eq 0 ]; then
+              /usr/local/bin/media-pi-agent --help || true
+              exit 2
+            fi
+            echo "Integration (arm64/QEMU) checks passed"
+          BASH
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-latest
     needs: integration-test
     steps:
       - name: Download all artifacts
