@@ -78,13 +78,30 @@ func main() {
 
 	switch cmd {
 	case "list":
-		var units []string
-		for u := range allow {
-			units = append(units, u)
+		// For each allowed unit, gather the same status information as the "status" command
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		type unitInfo struct {
+			Unit   string      `json:"unit"`
+			Active interface{} `json:"active,omitempty"`
+			Sub    interface{} `json:"sub,omitempty"`
+			Error  string      `json:"error,omitempty"`
 		}
+
+		var infos []unitInfo
+		for u := range allow {
+			props, err := conn.GetUnitPropertiesContext(ctx, u)
+			if err != nil {
+				infos = append(infos, unitInfo{Unit: u, Error: err.Error()})
+				continue
+			}
+			infos = append(infos, unitInfo{Unit: u, Active: props["ActiveState"], Sub: props["SubState"]})
+		}
+
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"ok":    true,
-			"units": units,
+			"units": infos,
 		})
 	case "status", "start", "stop", "restart", "enable", "disable":
 		if len(os.Args) < 3 {
