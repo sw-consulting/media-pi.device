@@ -26,10 +26,11 @@ mkdir -p "${WORK}/DEBIAN"
 
 # Copy payload
 install -m 0755 "${BIN}" "${ROOT}/usr/local/bin/pi-sdctl"
-ls -l
-ls -l packaging/
 install -m 0644 packaging/agent.yaml "${ROOT}/etc/pi-sdctl/agent.yaml"
 install -m 0644 packaging/90-pi-sdctl.rules "${ROOT}/etc/polkit-1/rules.d/90-pi-sdctl.rules"
+
+ls -l "${ROOT}/etc/pi-sdctl"
+ls -l "${ROOT}/etc/polkit-1/rules.d"  
 
 # Mark config files so dpkg keeps local edits
 cat > "${WORK}/DEBIAN/conffiles" <<EOF
@@ -44,7 +45,7 @@ Version: ${VERSION}
 Section: admin
 Priority: optional
 Architecture: ${ARCH}
-Maintainer: Your Name <you@example.com>
+Maintainer: Maxim Samsonov <maxirmx@sw.consulting>
 Depends: dbus, policykit-1, systemd
 Description: Systemd control agent via D-Bus for Raspberry Pi
  Provides pi-sdctl CLI to list/status/start/stop whitelisted units via system bus.
