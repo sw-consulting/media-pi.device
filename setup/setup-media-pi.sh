@@ -26,14 +26,6 @@ if [[ ! -f ${PRIVKEY_PATH} ]]; then
   ssh-keygen -t ed25519 -N "" -f "${PRIVKEY_PATH}"
 fi
 
-# Compute deviceId from OpenSSH public key fingerprint (SHA256 -> base64url)
-# This shall match Media Pi DevicesController logic
-FP_RAW=$(ssh-keygen -lf "${PUBKEY_PATH}" -E sha256 | awk '{print $2}' | sed 's/^SHA256://')
-FP_URLSAFE=$(echo -n "${FP_RAW}" | tr '+/' '-_' | tr -d '=')
-DEVICE_ID="fp-${FP_URLSAFE}"
-
-echo "Derived deviceId: ${DEVICE_ID}"
-
 # Prepare metadata
 HOSTNAME=$(hostname)
 # OS_NAME=$(grep -oP '(?<=^PRETTY_NAME=).+' /etc/os-release | tr -d '"')
