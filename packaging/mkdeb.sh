@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2025 sw.consulting
-# This file is a part of Media Pi device agent application
+# This file is a part of Media Pi device agent
 
 set -euo pipefail
 
@@ -49,9 +49,12 @@ mkdir -p "${WORK}/DEBIAN"
 install -m 0755 "${BIN}" "${ROOT}/usr/local/bin/media-pi-agent"
 
 # Копируем agent.yaml из каталога packaging рядом с этим скриптом.
-# Важно: используем ${SCRIPT_DIR} — тогда пакет соберётся корректно,
+# Используем ${SCRIPT_DIR} — тогда пакет соберётся корректно,
 # даже если mkdeb.sh запускали из корня репозитория или другой директории.
 install -m 0644 "${SCRIPT_DIR}/agent.yaml" "${ROOT}/etc/media-pi-agent/agent.yaml"
+
+# setup-media-pi.sh --> /usr/local/bin
+install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bin/setup-media-pi.sh"
 
 # Генерация правила polkit на этапе сборки.
 # Пояснение: polkit-правила выполняются в изолированной JS-среде и

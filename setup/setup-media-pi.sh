@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2025 sw.consulting
-# This file is a part of Media Pi frontend application
+# This file is a part of Media Pi device agent
 
 set -euo pipefail
 
