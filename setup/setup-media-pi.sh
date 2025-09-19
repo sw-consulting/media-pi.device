@@ -71,7 +71,7 @@ else
   echo "Device registration response did not include an ID."
 fi
 
-if ! SERVER_PUBLIC_SSH_KEY=$(jq -er '.serverPublicSshKey' <<<"${RESP}" 2>/dev/null); then
+if ! SERVER_PUBLIC_SSH_KEY=$(jq -er '.serverPublicSshKey' <<<"${RESP}"); then
   echo "Error: serverPublicSshKey is missing in the enrollment response" >&2
   exit 1
 fi
