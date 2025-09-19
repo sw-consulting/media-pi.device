@@ -3,6 +3,10 @@
 
 name: Build & Package pi-sdctl
 
+concurrency:
+  group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'
+  cancel-in-progress: true    
+
 on:
   push:
     branches: [ main ]
@@ -33,7 +37,7 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Go build (fully static, no cgo)
+      - name: Build agent
         run: |
           mkdir -p dist/${{ matrix.target.name }}
           CGO_ENABLED=0 \

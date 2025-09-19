@@ -26,6 +26,8 @@ mkdir -p "${WORK}/DEBIAN"
 
 # Copy payload
 install -m 0755 "${BIN}" "${ROOT}/usr/local/bin/pi-sdctl"
+ls -l
+ls -l packaging/
 install -m 0644 packaging/agent.yaml "${ROOT}/etc/pi-sdctl/agent.yaml"
 install -m 0644 packaging/90-pi-sdctl.rules "${ROOT}/etc/polkit-1/rules.d/90-pi-sdctl.rules"
 
