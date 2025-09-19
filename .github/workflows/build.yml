@@ -1,0 +1,176 @@
+# Copyright (c) 2025 sw.consulting
+# This file is a part of Media Pi device agent
+
+name: Build & Package media-pi-agent
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'
+  cancel-in-progress: true    
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: armhf
+            goos: linux
+            goarch: arm
+            goarm: '7'
+          - name: arm64
+            goos: linux
+            goarch: arm64
+            goarm: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.1'
+
+      - name: Run unit tests
+        if: matrix.target.name == 'arm64'
+        run: |
+          go test ./...
+
+      - name: Build agent
+        run: |
+          mkdir -p dist/${{ matrix.target.name }}
+          CGO_ENABLED=0 \
+          GOOS=${{ matrix.target.goos }} \
+          GOARCH=${{ matrix.target.goarch }} \
+          GOARM=${{ matrix.target.goarm }} \
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -extldflags '-static'" \
+            -o dist/${{ matrix.target.name }}/media-pi-agent .
+
+      - name: Show file info
+        run: |
+          file dist/${{ matrix.target.name }}/media-pi-agent || true
+          du -h dist/${{ matrix.target.name }}/media-pi-agent || true
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-pi-agent-${{ matrix.target.name }}
+          path: dist/${{ matrix.target.name }}/media-pi-agent
+          if-no-files-found: error
+
+  package:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ armhf, arm64 ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download built binaries
+        uses: actions/download-artifact@v5
+        with:
+          name: media-pi-agent-${{ matrix.arch }}
+          path: dist/${{ matrix.arch }}
+
+      - name: Make mkdeb executable
+        run: chmod +x packaging/mkdeb.sh
+
+      - name: Derive version
+        id: ver
+        run: |
+          # If tag like v0.1.0 is present, use it; otherwise derive from short SHA
+          if [[ "${GITHUB_REF}" =~ refs/tags/v(.+) ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build .deb
+        run: |
+          ./packaging/mkdeb.sh "${{ matrix.arch }}" "${{ steps.ver.outputs.version }}" "dist/${{ matrix.arch }}/media-pi-agent"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-pi-agent-deb-${{ matrix.arch }}
+          path: build/media-pi-agent_*_${{ matrix.arch }}.deb
+          if-no-files-found: error
+
+  integration-test:
+    name: Integration test (arm64 via QEMU)
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - name: Download arm64 deb artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: media-pi-agent-deb-arm64
+          path: debs
+
+      - name: List downloaded files
+        run: ls -l debs
+
+      - name: Set up QEMU emulation for ARM
+        uses: docker/setup-qemu-action@v3
+
+      - name: Run integration tests in arm64 container
+        run: |
+          set -euxo pipefail
+          PKGFILE=$(ls debs/*.deb | head -n1)
+          ABS_PKGFILE=$(readlink -f "$PKGFILE" || realpath "$PKGFILE")
+          PKGDIR=$(dirname "$ABS_PKGFILE")
+          BASENAME=$(basename "$ABS_PKGFILE")
+          echo "Testing package: $ABS_PKGFILE"
+          # Mount the directory; inside container reference /pkgs/$BASENAME
+          docker run --rm --platform linux/arm64 -v "$PKGDIR":/pkgs:ro ubuntu:24.04 bash -xe -o pipefail <<'BASH'
+            set -euo pipefail
+            apt-get update -y
+            apt-get install -y --no-install-recommends dpkg coreutils
+            dpkg -i /pkgs/$BASENAME || true
+            test -f /usr/local/bin/media-pi-agent
+            test -x /usr/local/bin/media-pi-agent
+            test -f /usr/local/bin/setup-media-pi.sh
+            test -x /usr/local/bin/setup-media-pi.sh
+            test -f /etc/media-pi-agent/agent.yaml
+            test -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
+            tried=0
+            for flag in --help -h --version -v; do
+              if /usr/local/bin/media-pi-agent "$flag" >/tmp/agent.out 2>&1; then
+                echo "agent responded successfully to $flag"; tried=1; break; fi
+            done
+            if [ "$tried" -eq 0 ]; then
+              /usr/local/bin/media-pi-agent --help || true
+              exit 2
+            fi
+            echo "Integration (arm64/QEMU) checks passed"
+          BASH
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: integration-test
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dist-all
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-all/**/media-pi-agent
+            dist-all/**/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

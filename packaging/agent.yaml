@@ -1,0 +1,13 @@
+# Copyright (c) 2025 sw.consulting
+# This file is a part of Media Pi device agent
+
+allowed_units:
+  - mnt-usb.mount
+  - mnt-ya.disk.mount
+  - mnt-ya.disk.automount
+  - playlist.upload.service
+  - video.upload.service
+  - playlist.upload.timer 
+  - video.upload.timer
+  - play.video.service
+  
