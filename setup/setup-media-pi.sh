@@ -64,7 +64,7 @@ if [[ -z "${RESP}" ]]; then
   exit 1
 fi
 
-DEVICE_ID=$(jq -r '.id // .Id // empty' <<<"${RESP}" || true)
+DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" || true)
 if [[ -n "${DEVICE_ID}" ]]; then
   echo "Device registered with ID ${DEVICE_ID}."
 else
