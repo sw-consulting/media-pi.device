@@ -89,6 +89,26 @@ func TestHealthEndpoint(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected ok=true, got %v", resp.OK)
 	}
+
+	// Check that response data contains required fields
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be map[string]interface{}, got %T", resp.Data)
+	}
+
+	if status, exists := data["status"]; !exists || status != "healthy" {
+		t.Fatalf("expected status=healthy, got %v", status)
+	}
+
+	if version, exists := data["version"]; !exists {
+		t.Fatalf("expected version field to be present")
+	} else if versionStr, ok := version.(string); !ok || versionStr == "" {
+		t.Fatalf("expected version to be non-empty string, got %v", version)
+	}
+
+	if _, exists := data["time"]; !exists {
+		t.Fatalf("expected time field to be present")
+	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
@@ -278,12 +298,12 @@ func TestSetupConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when server key already present", func(t *testing.T) {
+	t.Run("overwrites existing server key with warning", func(t *testing.T) {
 		configPath := filepath.Join(t.TempDir(), "agent.yaml")
 		existing := Config{
 			AllowedUnits: []string{"custom.service"},
 			ListenAddr:   "127.0.0.1:9000",
-			ServerKey:    "existing",
+			ServerKey:    "existing-key-123",
 		}
 		data, err := yaml.Marshal(existing)
 		if err != nil {
@@ -293,8 +313,30 @@ func TestSetupConfig(t *testing.T) {
 			t.Fatalf("write existing config: %v", err)
 		}
 
-		if err := setupConfig(configPath); err == nil {
-			t.Fatalf("expected setupConfig to fail when server_key already set")
+		if err := setupConfig(configPath); err != nil {
+			t.Fatalf("setupConfig should succeed and overwrite existing key: %v", err)
+		}
+
+		updatedData, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read updated config: %v", err)
+		}
+		var updated Config
+		if err := yaml.Unmarshal(updatedData, &updated); err != nil {
+			t.Fatalf("unmarshal updated config: %v", err)
+		}
+
+		if updated.ServerKey == "" {
+			t.Fatalf("expected server key to be generated")
+		}
+		if updated.ServerKey == "existing-key-123" {
+			t.Fatalf("expected server key to be replaced, but it remained the same")
+		}
+		if len(updated.AllowedUnits) != 1 || updated.AllowedUnits[0] != "custom.service" {
+			t.Fatalf("expected allowed units to be preserved, got %#v", updated.AllowedUnits)
+		}
+		if updated.ListenAddr != "127.0.0.1:9000" {
+			t.Fatalf("expected listen addr to be preserved, got %q", updated.ListenAddr)
 		}
 	})
 }

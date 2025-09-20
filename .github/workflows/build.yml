@@ -42,6 +42,16 @@ jobs:
         run: |
           go test -v ./...
 
+      - name: Derive version for build
+        id: version
+        run: |
+          # If tag like v0.1.0 is present, use it; otherwise derive from short SHA
+          if [[ "${GITHUB_REF}" =~ refs/tags/v(.+) ]]; then
+            echo "version=v${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=v0.0.0-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build agent
         run: |
           mkdir -p dist/${{ matrix.target.name }}
@@ -50,7 +60,7 @@ jobs:
           GOARCH=${{ matrix.target.goarch }} \
           GOARM=${{ matrix.target.goarm }} \
           go build -trimpath -buildvcs=false \
-            -ldflags "-s -w -extldflags '-static'" \
+            -ldflags "-s -w -extldflags '-static' -X main.Version=${{ steps.version.outputs.version }}" \
             -o dist/${{ matrix.target.name }}/media-pi-agent .
 
       - name: Show file info

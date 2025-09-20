@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -56,6 +57,28 @@ var (
 )
 
 const defaultListenAddr = "0.0.0.0:8080"
+
+// Version can be set at build time with -ldflags "-X main.Version=v1.2.3"
+var Version = "unknown"
+
+// getVersion returns the service version, preferring build-time version,
+// falling back to git tag, then "unknown"
+func getVersion() string {
+	if Version != "unknown" {
+		return Version
+	}
+
+	// Try to get version from git tag
+	if cmd := exec.Command("git", "describe", "--tags", "--abbrev=0"); cmd != nil {
+		if output, err := cmd.Output(); err == nil {
+			if version := strings.TrimSpace(string(output)); version != "" {
+				return version
+			}
+		}
+	}
+
+	return "unknown"
+}
 
 func defaultConfig() Config {
 	return Config{
@@ -111,7 +134,7 @@ func setupConfig(configPath string) error {
 			return fmt.Errorf("failed to parse existing config: %w", err)
 		}
 		if config.ServerKey != "" {
-			return fmt.Errorf("configuration at %s already has a server_key; delete or clear it before running setup", configPath)
+			fmt.Printf("Warning: configuration at %s already has a server_key; it will be overwritten\n", configPath)
 		}
 		if config.ListenAddr == "" {
 			config.ListenAddr = defaultListenAddr
@@ -148,7 +171,7 @@ func setupConfig(configPath string) error {
 		fmt.Printf("Configuration created at %s\n", configPath)
 	}
 	fmt.Printf("Server key: %s\n", key)
-	fmt.Println("Please save this key securely - it will be required for API access")
+	fmt.Println("The key is saved in the agent configuration file, it will be used for API access")
 
 	return nil
 }
@@ -409,8 +432,9 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: map[string]string{
-			"status": "healthy",
-			"time":   time.Now().UTC().Format(time.RFC3339),
+			"status":  "healthy",
+			"version": getVersion(),
+			"time":    time.Now().UTC().Format(time.RFC3339),
 		},
 	})
 }

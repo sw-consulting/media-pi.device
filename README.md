@@ -10,28 +10,39 @@ Media Pi Agent — это REST сервис для управления разр
 
 ## Установка
 
-1) Скачайте дистрибутив программного обеспечения, например, в `/tmp/media-pi-agent.deb`
+1) Скачайте дистрибутив программного обеспечения в `/home/pi/Downloads/media-pi-agent.deb`
 
    Опубликованные версии доступны в [релизах GitHub](https://github.com/sw-consulting/media-pi.device/releases)
 
 2) Установите пакет 
 
 ```bash
-sudo dpkg -i /tmp/media-pi-agent.deb
+sudo dpkg -i /home/pi/Downloads/media-pi-agent.deb
 ```
 
-3) Настройте сервис
+Пакет автоматически установит все зависимости (curl, jq) и включит сервис.
+
+3) Настройте и запустите сервис
 
 ```bash
-sudo media-pi-agent setup
+# Установите URL сервера управления (обязательно!)
+export CORE_API_BASE="https://your-server.com/api"
+
+# Выполните настройку (создаст конфигурацию, зарегистрирует устройство и запустит сервис)
+sudo -E setup-media-pi.sh
 ```
 
-Команда создаст конфигурацию и сгенерирует ключ сервера. Сохраните ключ — он потребуется для доступа к API.
+**Важно:** Переменная `CORE_API_BASE` должна указывать на ваш сервер управления. Значение по умолчанию (`https://media-pi.sw.consulting:8086/api`) подойдет только для тестирования.
 
-4) Запустите сервис
+Скрипт `setup-media-pi.sh` автоматически:
+- Создаст конфигурацию с уникальным ключом сервера
+- Зарегистрирует устройство на сервере управления  
+- Запустит и включит systemd сервис
+- Проверит работоспособность API
+
+4) Проверьте статус сервиса (опционально)
 
 ```bash
-sudo systemctl start media-pi-agent
 sudo systemctl status media-pi-agent
 ```
 
@@ -56,21 +67,90 @@ curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8080/api/units
 
 ## Конфигурация
 
-Файл конфигурации: `/etc/media-pi-agent/agent.yaml`
+### Переменные окружения
+
+Скрипт настройки `setup-media-pi.sh` поддерживает следующие переменные окружения:
+
+- `CORE_API_BASE` — URL API сервера управления (обязательно для продакшена)
+  - По умолчанию: `https://media-pi.sw.consulting:8086/api`
+  - Пример: `https://your-management-server.com/api`
+
+Примеры запуска с переменными окружения:
+
+```bash
+# Основной способ
+export CORE_API_BASE="https://your-server.com/api"
+sudo -E setup-media-pi.sh
+
+# Альтернативный способ (одной строкой)
+CORE_API_BASE="https://your-server.com/api" sudo -E setup-media-pi.sh
+```
+
+### Файл конфигурации
+
+Путь: `/etc/media-pi-agent/agent.yaml`
 
 ```yaml
 allowed_units:
   - example.service
-server_key: "your-generated-key"
+server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8080"
 ```
 
+Ключ сервера (`server_key`) генерируется автоматически и используется для аутентификации API запросов.
+
+## Устранение неполадок
+
+### Проверка статуса сервиса
+
+```bash
+# Проверить статус сервиса
+sudo systemctl status media-pi-agent
+
+# Просмотреть логи
+sudo journalctl -u media-pi-agent -f
+
+# Проверить доступность API
+curl http://localhost:8080/health
+```
+
+### Проблемы с настройкой
+
+Если `setup-media-pi.sh` завершается с ошибкой:
+
+1. Убедитесь, что установлена переменная `CORE_API_BASE`:
+   ```bash
+   echo $CORE_API_BASE
+   ```
+
+2. Проверьте доступность сервера управления:
+   ```bash
+   curl -I "$CORE_API_BASE/devices/register"
+   ```
+
+3. Проверьте права доступа к конфигурации:
+   ```bash
+   ls -la /etc/media-pi-agent/
+   ```
+
 ## Удаление
 
-Для удаления сервиса используйте скрипт:
+Для полного удаления сервиса:
+
+```bash
+# Остановить и отключить сервис
+sudo systemctl stop media-pi-agent
+sudo systemctl disable media-pi-agent
+
+# Удалить пакет
+sudo dpkg -r media-pi-agent
+
+# Удалить конфигурацию (опционально)
+sudo rm -rf /etc/media-pi-agent/
+```
+
+Или используйте скрипт удаления:
 
 ```bash
 sudo uninstall-media-pi.sh
 ```
-
-Скрипт остановит сервис, удалит бинарные файлы и предложит удалить конфигурацию.
