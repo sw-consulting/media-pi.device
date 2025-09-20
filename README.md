@@ -62,7 +62,7 @@ sudo systemctl status media-pi-agent
 Все API endpoints (кроме `/health`) требуют авторизации через Bearer token:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8080/api/units
+curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8081/api/units
 ```
 
 ## Конфигурация
@@ -89,7 +89,7 @@ CORE_API_BASE="https://your-server.com" sudo -E setup-media-pi.sh
 allowed_units:
   - example.service
 server_key: "auto-generated-key"
-listen_addr: "0.0.0.0:8080"
+listen_addr: "0.0.0.0:8081"
 ```
 
 Ключ сервера (`server_key`) генерируется автоматически и используется для аутентификации API запросов.
@@ -106,7 +106,7 @@ sudo systemctl status media-pi-agent
 sudo journalctl -u media-pi-agent -f
 
 # Проверить доступность API
-curl http://localhost:8080/health
+curl http://localhost:8081/health
 ```
 
 ### Проблемы с настройкой

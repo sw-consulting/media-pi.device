@@ -111,7 +111,7 @@ sudo systemctl status media-pi-agent
 sudo journalctl -u media-pi-agent -f
 
 # Test API health
-curl http://localhost:8080/health
+curl http://localhost:8081/health
 ```
 
 ### Package Build Process

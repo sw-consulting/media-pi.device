@@ -33,7 +33,7 @@ func TestLoadConfigFrom(t *testing.T) {
   - a.service
   - b.service
 server_key: "test-key-123"
-listen_addr: "0.0.0.0:8080"
+listen_addr: "0.0.0.0:8081"
 `
 	if err := os.WriteFile(p, []byte(yaml), 0644); err != nil {
 		t.Fatalf("write: %v", err)

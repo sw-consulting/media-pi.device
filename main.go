@@ -56,7 +56,7 @@ var (
 	serverKey    string
 )
 
-const defaultListenAddr = "0.0.0.0:8080"
+const defaultListenAddr = "0.0.0.0:8081"
 
 // Version can be set at build time with -ldflags "-X main.Version=v1.2.3"
 var Version = "unknown"

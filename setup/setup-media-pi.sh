@@ -52,7 +52,7 @@ echo "Generated server key: ${SERVER_KEY}"
 # Prepare device metadata
 HOSTNAME=$(hostname)
 DEVICE_IP=$(hostname -I | awk '{print $1}')
-AGENT_PORT=8080
+AGENT_PORT=8081
 
 # Extract port from configuration if specified
 if grep -q '^listen_addr:' "${AGENT_CONFIG_PATH}"; then

@@ -15,4 +15,4 @@ allowed_units:
 server_key: ""
 
 # Listen address for REST API
-listen_addr: "0.0.0.0:8080"
+listen_addr: "0.0.0.0:8081"
