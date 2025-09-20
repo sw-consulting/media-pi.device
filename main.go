@@ -155,6 +155,10 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
+		if len(token) != len(serverKey) {
+			http.Error(w, "Invalid token length", http.StatusUnauthorized)
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(serverKey)) != 1 {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
