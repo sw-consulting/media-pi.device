@@ -26,13 +26,13 @@ sudo dpkg -i /home/pi/Downloads/media-pi-agent.deb
 
 ```bash
 # Установите URL сервера управления (обязательно!)
-export CORE_API_BASE="https://your-server.com/api"
+export CORE_API_BASE="https://your-server.com"
 
 # Выполните настройку (создаст конфигурацию, зарегистрирует устройство и запустит сервис)
 sudo -E setup-media-pi.sh
 ```
 
-**Важно:** Переменная `CORE_API_BASE` должна указывать на ваш сервер управления. Значение по умолчанию (`https://media-pi.sw.consulting:8086/api`) подойдет только для тестирования.
+**Важно:** Переменная `CORE_API_BASE` должна указывать на ваш сервер управления. Значение по умолчанию (`https://media-pi.sw.consulting:8086`) подойдет только для тестирования.
 
 Скрипт `setup-media-pi.sh` автоматически:
 - Создаст конфигурацию с уникальным ключом сервера
