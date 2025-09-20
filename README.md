@@ -20,7 +20,7 @@ Media Pi Agent — это REST сервис для управления разр
 sudo dpkg -i /home/pi/Downloads/media-pi-agent.deb
 ```
 
-Пакет автоматически установит все зависимости (curl, jq) и включит сервис.
+Пакет автоматически установит все зависимости (curl, jq) и файлы сервиса. Сервис пока не запущен - это сделает следующий шаг.
 
 3) Настройте и запустите сервис
 
@@ -72,18 +72,13 @@ curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8080/api/units
 Скрипт настройки `setup-media-pi.sh` поддерживает следующие переменные окружения:
 
 - `CORE_API_BASE` — URL API сервера управления (обязательно для продакшена)
-  - По умолчанию: `https://media-pi.sw.consulting:8086/api`
-  - Пример: `https://your-management-server.com/api`
+  - По умолчанию: `https://media-pi.sw.consulting:8086`
+  - Пример: `https://your-management-server.com`
 
-Примеры запуска с переменными окружения:
+Пример запуска с переменными окружения:
 
 ```bash
-# Основной способ
-export CORE_API_BASE="https://your-server.com/api"
-sudo -E setup-media-pi.sh
-
-# Альтернативный способ (одной строкой)
-CORE_API_BASE="https://your-server.com/api" sudo -E setup-media-pi.sh
+CORE_API_BASE="https://your-server.com" sudo -E setup-media-pi.sh
 ```
 
 ### Файл конфигурации
@@ -125,7 +120,7 @@ curl http://localhost:8080/health
 
 2. Проверьте доступность сервера управления:
    ```bash
-   curl -I "$CORE_API_BASE/devices/register"
+   curl -I "$CORE_API_BASE/api/status/status"
    ```
 
 3. Проверьте права доступа к конфигурации:
