@@ -88,8 +88,8 @@ if [[ "${HTTP_STATUS}" =~ ^2[0-9][0-9]$ ]]; then
     RESP=$(cat /tmp/registration_response.json)
     rm -f /tmp/registration_response.json
     
-    echo "Registration response received:"
-    echo "${RESP}" | jq '.' 2>/dev/null || echo "${RESP}"
+  #  echo "Registration response received:"
+  #  echo "${RESP}" | jq '.' 2>/dev/null || echo "${RESP}"
     
     # Extract device ID if present
     DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" 2>/dev/null || true)
