@@ -22,8 +22,8 @@ echo "2. Run: sudo -E setup-media-pi.sh"
 echo ""
 echo "For uninstallation, run: sudo uninstall-media-pi.sh"
 exit 0
-EOFDIR). Это нужно, чтобы
-# корректно находить файлы в каталоге packaging, даже если mkdeb.sh
+EOF
+# Это нужно, чтобы корректно находить файлы скрипта (SCRIPT_DIR) в каталоге packaging, даже если mkdeb.sh
 # запускают из другой текущей рабочей директории.
 # ${BASH_SOURCE[0]} — путь к самому скрипту; обёртка с cd...pwd даёт
 # абсолютный путь к каталогу, где лежит mkdeb.sh.
