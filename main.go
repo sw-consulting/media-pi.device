@@ -31,7 +31,7 @@ type Config struct {
 
 type APIResponse struct {
 	OK     bool        `json:"ok"`
-	ErrMsg string      `json:"err_msg,omitempty"`
+	ErrMsg string      `json:"errmsg,omitempty"`
 	Data   interface{} `json:"data,omitempty"`
 }
 
@@ -182,7 +182,7 @@ func setupConfig(configPath string) error {
 
 func isAllowed(unit string) error {
 	if _, ok := allowedUnits[unit]; !ok {
-		return fmt.Errorf("unit %q is not allowed", unit)
+		return fmt.Errorf("Управление сервисом %q запрещено", unit)
 	}
 	return nil
 }
@@ -191,19 +191,19 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if auth == "" {
-			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Authorization header required"})
+			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется заголовок Authorization"})
 			return
 		}
 
 		if !strings.HasPrefix(auth, "Bearer ") {
-			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Bearer token required"})
+			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется токен Bearer"})
 			return
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(token), []byte(serverKey)) != 1 {
 			// Do not reveal the expected key in the response; return a consistent JSON error.
-			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Invalid token"})
+			jsonResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Недействительный токен"})
 			return
 		}
 
@@ -223,7 +223,7 @@ func handleListUnits(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
-			ErrMsg: "Method not allowed",
+			ErrMsg: "Метод не разрешён",
 		})
 		return
 	}
@@ -232,7 +232,7 @@ func handleListUnits(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("dbus connection failed: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
 		})
 		return
 	}
@@ -265,7 +265,7 @@ func handleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
-			ErrMsg: "Method not allowed",
+			ErrMsg: "Метод не разрешён",
 		})
 		return
 	}
@@ -274,7 +274,7 @@ func handleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	if unit == "" {
 		jsonResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
-			ErrMsg: "unit parameter is required",
+			ErrMsg: "Требуется параметр unit",
 		})
 		return
 	}
@@ -291,7 +291,7 @@ func handleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		jsonResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("dbus connection failed: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
 		})
 		return
 	}
@@ -324,7 +324,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		if r.Method != http.MethodPost {
 			jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
 				OK:     false,
-				ErrMsg: "Method not allowed",
+				ErrMsg: "Метод запрещён",
 			})
 			return
 		}
@@ -333,7 +333,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{
 				OK:     false,
-				ErrMsg: "Invalid JSON body",
+				ErrMsg: "Неверный JSON в теле запроса",
 			})
 			return
 		}
@@ -341,7 +341,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		if req.Unit == "" {
 			jsonResponse(w, http.StatusBadRequest, APIResponse{
 				OK:     false,
-				ErrMsg: "unit field is required",
+				ErrMsg: "Поле unit обязательно",
 			})
 			return
 		}
@@ -358,7 +358,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		if err != nil {
 			jsonResponse(w, http.StatusInternalServerError, APIResponse{
 				OK:     false,
-				ErrMsg: fmt.Sprintf("dbus connection failed: %v", err),
+				ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
 			})
 			return
 		}
@@ -402,7 +402,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		default:
 			jsonResponse(w, http.StatusBadRequest, APIResponse{
 				OK:     false,
-				ErrMsg: fmt.Sprintf("unknown action: %s", action),
+				ErrMsg: fmt.Sprintf("Неизвестное действие: %s", action),
 			})
 			return
 		}
@@ -410,7 +410,7 @@ func handleUnitAction(action string) http.HandlerFunc {
 		if actionErr != nil {
 			jsonResponse(w, http.StatusInternalServerError, APIResponse{
 				OK:     false,
-				ErrMsg: actionErr.Error(),
+				ErrMsg: "Выполнение действия завершилось с ошибкой: " + actionErr.Error(),
 			})
 			return
 		}
@@ -429,7 +429,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
-			ErrMsg: "Method not allowed",
+			ErrMsg: "Метод не разрешён",
 		})
 		return
 	}
