@@ -69,30 +69,60 @@ echo "  Agent Port: ${AGENT_PORT}"
 
 # Register device with central server
 echo "Registering device at ${CORE_API_BASE}/devices/register ..."
-if ! RESP=$(
-  curl -sS  -X POST "${CORE_API_BASE}/devices/register" \
-    -H 'Content-Type: application/json' \
-    -d @<(jq -n --arg sk "$SERVER_KEY" \
-              --arg hn "$HOSTNAME" \
-              --arg ip "$DEVICE_IP" \
-              --argjson port "$AGENT_PORT" \
-              '{ serverKey: $sk, name: $hn, ipAddress: $ip, port: $port }')
-); then
-  echo "Error: device registration request failed" >&2
-  exit 1
-fi
 
-if [[ -n "${RESP}" ]]; then
-  echo "Registration response received:"
-  echo "${RESP}" | jq '.' 2>/dev/null || echo "${RESP}"
-  
-  # Extract device ID if present
-  DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" 2>/dev/null || true)
-  if [[ -n "${DEVICE_ID}" ]]; then
-    echo "Device registered with ID: ${DEVICE_ID}"
+# Use curl with -w flag to capture HTTP status code
+HTTP_STATUS=$(curl -sS -w "%{http_code}" -o /tmp/registration_response.json \
+  -X POST "${CORE_API_BASE}/devices/register" \
+  -H 'Content-Type: application/json' \
+  -d @<(jq -n --arg sk "$SERVER_KEY" \
+            --arg hn "$HOSTNAME" \
+            --arg ip "$DEVICE_IP" \
+            --argjson port "$AGENT_PORT" \
+            '{ serverKey: $sk, name: $hn, ipAddress: $ip, port: $port }') \
+  2>/dev/null || echo "000")
+
+# Check HTTP status code
+if [[ "${HTTP_STATUS}" =~ ^2[0-9][0-9]$ ]]; then
+  # Success: 2xx status codes
+  if [[ -f "/tmp/registration_response.json" ]] && [[ -s "/tmp/registration_response.json" ]]; then
+    RESP=$(cat /tmp/registration_response.json)
+    rm -f /tmp/registration_response.json
+    
+    echo "Registration response received:"
+    echo "${RESP}" | jq '.' 2>/dev/null || echo "${RESP}"
+    
+    # Extract device ID if present
+    DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" 2>/dev/null || true)
+    if [[ -n "${DEVICE_ID}" ]]; then
+      echo "Device registered with ID: ${DEVICE_ID}"
+    fi
+  else
+    # Empty response is an error
+    echo "Error: Device registration failed - empty response from server!" >&2
+    echo "HTTP Status: ${HTTP_STATUS}" >&2
+    echo "Please check:" >&2
+    echo "  - CORE_API_BASE is correct: ${CORE_API_BASE}" >&2
+    echo "  - Management server is functioning properly" >&2
+    rm -f /tmp/registration_response.json
+    exit 1
   fi
 else
-  echo "Device registration completed (empty response)"
+  # Failure: non-2xx status codes or curl error
+  echo "Error: Device registration failed!" >&2
+  echo "HTTP Status: ${HTTP_STATUS}" >&2
+  echo "Please check:" >&2
+  echo "  - CORE_API_BASE is correct: ${CORE_API_BASE}" >&2
+  echo "  - Management server is accessible" >&2
+  echo "  - Network connectivity" >&2
+  
+  # Show response body if available for debugging
+  if [[ -f "/tmp/registration_response.json" ]]; then
+    echo "Server response:" >&2
+    cat /tmp/registration_response.json >&2
+    rm -f /tmp/registration_response.json
+  fi
+  
+  exit 1
 fi
 
 # Enable and start the media-pi-agent service
