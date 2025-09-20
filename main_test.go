@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestIsAllowed(t *testing.T) {
@@ -178,4 +180,92 @@ func TestUnitActionRequest(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for forbidden unit, got %d", w.Code)
 	}
+}
+
+func TestSetupConfig(t *testing.T) {
+	t.Run("creates configuration when missing", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "agent.yaml")
+		if err := setupConfig(configPath); err != nil {
+			t.Fatalf("setupConfig: %v", err)
+		}
+
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read config: %v", err)
+		}
+
+		var cfg Config
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("unmarshal config: %v", err)
+		}
+
+		if cfg.ServerKey == "" {
+			t.Fatalf("expected server key to be generated")
+		}
+		if len(cfg.AllowedUnits) == 0 {
+			t.Fatalf("expected default allowed units")
+		}
+		if cfg.ListenAddr != defaultListenAddr {
+			t.Fatalf("expected listen addr %q, got %q", defaultListenAddr, cfg.ListenAddr)
+		}
+	})
+
+	t.Run("updates existing configuration without server key", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "agent.yaml")
+		existing := Config{
+			AllowedUnits: []string{"custom.service"},
+			ListenAddr:   "127.0.0.1:9000",
+			ServerKey:    "",
+		}
+		data, err := yaml.Marshal(existing)
+		if err != nil {
+			t.Fatalf("marshal existing config: %v", err)
+		}
+		if err := os.WriteFile(configPath, data, 0600); err != nil {
+			t.Fatalf("write existing config: %v", err)
+		}
+
+		if err := setupConfig(configPath); err != nil {
+			t.Fatalf("setupConfig: %v", err)
+		}
+
+		updatedData, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read updated config: %v", err)
+		}
+		var updated Config
+		if err := yaml.Unmarshal(updatedData, &updated); err != nil {
+			t.Fatalf("unmarshal updated config: %v", err)
+		}
+
+		if updated.ServerKey == "" {
+			t.Fatalf("expected server key to be generated")
+		}
+		if len(updated.AllowedUnits) != 1 || updated.AllowedUnits[0] != "custom.service" {
+			t.Fatalf("expected allowed units to be preserved, got %#v", updated.AllowedUnits)
+		}
+		if updated.ListenAddr != "127.0.0.1:9000" {
+			t.Fatalf("expected listen addr to be preserved, got %q", updated.ListenAddr)
+		}
+	})
+
+	t.Run("fails when server key already present", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "agent.yaml")
+		existing := Config{
+			AllowedUnits: []string{"custom.service"},
+			ListenAddr:   "127.0.0.1:9000",
+			ServerKey:    "existing",
+		}
+		data, err := yaml.Marshal(existing)
+		if err != nil {
+			t.Fatalf("marshal existing config: %v", err)
+		}
+		if err := os.WriteFile(configPath, data, 0600); err != nil {
+			t.Fatalf("write existing config: %v", err)
+		}
+
+		if err := setupConfig(configPath); err == nil {
+			t.Fatalf("expected setupConfig to fail when server_key already set")
+		}
+	})
 }

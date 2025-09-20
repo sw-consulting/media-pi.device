@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -52,7 +53,27 @@ type UnitActionResponse struct {
 var (
 	allowedUnits map[string]struct{}
 	serverKey    string
+
+	defaultAllowedUnits = []string{
+		"mnt-usb.mount",
+		"mnt-ya.disk.mount",
+		"mnt-ya.disk.automount",
+		"playlist.upload.service",
+		"video.upload.service",
+		"playlist.upload.timer",
+		"video.upload.timer",
+		"play.video.service",
+	}
 )
+
+const defaultListenAddr = "0.0.0.0:8080"
+
+func defaultConfig() Config {
+	return Config{
+		AllowedUnits: append([]string(nil), defaultAllowedUnits...),
+		ListenAddr:   defaultListenAddr,
+	}
+}
 
 func loadConfig() (*Config, error) {
 	return loadConfigFrom("/etc/media-pi-agent/agent.yaml")
@@ -90,8 +111,29 @@ func generateServerKey() (string, error) {
 }
 
 func setupConfig(configPath string) error {
-	if _, err := os.Stat(configPath); err == nil {
-		return fmt.Errorf("configuration already exists at %s", configPath)
+	config := defaultConfig()
+	existing := false
+
+	data, err := os.ReadFile(configPath)
+	switch {
+	case err == nil:
+		existing = true
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("failed to parse existing config: %w", err)
+		}
+		if config.ServerKey != "" {
+			return fmt.Errorf("configuration at %s already has a server_key; delete or clear it before running setup", configPath)
+		}
+		if len(config.AllowedUnits) == 0 {
+			config.AllowedUnits = append([]string(nil), defaultAllowedUnits...)
+		}
+		if config.ListenAddr == "" {
+			config.ListenAddr = defaultListenAddr
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// Use defaults defined above.
+	default:
+		return fmt.Errorf("failed to read existing config: %w", err)
 	}
 
 	key, err := generateServerKey()
@@ -99,26 +141,13 @@ func setupConfig(configPath string) error {
 		return fmt.Errorf("failed to generate server key: %w", err)
 	}
 
-	config := Config{
-		AllowedUnits: []string{
-			"mnt-usb.mount",
-			"mnt-ya.disk.mount",
-			"mnt-ya.disk.automount",
-			"playlist.upload.service",
-			"video.upload.service",
-			"playlist.upload.timer",
-			"video.upload.timer",
-			"play.video.service",
-		},
-		ServerKey:  key,
-		ListenAddr: "0.0.0.0:8080",
-	}
+	config.ServerKey = key
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := yaml.Marshal(config)
+	data, err = yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -127,7 +156,11 @@ func setupConfig(configPath string) error {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Printf("Configuration created at %s\n", configPath)
+	if existing {
+		fmt.Printf("Configuration updated at %s\n", configPath)
+	} else {
+		fmt.Printf("Configuration created at %s\n", configPath)
+	}
 	fmt.Printf("Server key: %s\n", key)
 	fmt.Println("Please save this key securely - it will be required for API access")
 
@@ -155,10 +188,6 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
-		if len(token) != len(serverKey) {
-			http.Error(w, "Invalid token length", http.StatusUnauthorized)
-			return
-		}
 		if subtle.ConstantTimeCompare([]byte(token), []byte(serverKey)) != 1 {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
@@ -435,7 +464,7 @@ func main() {
 
 	listenAddr := config.ListenAddr
 	if listenAddr == "" {
-		listenAddr = "0.0.0.0:8080"
+		listenAddr = defaultListenAddr
 	}
 	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
 	log.Printf("API endpoints:")
