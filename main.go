@@ -5,11 +5,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -18,14 +23,42 @@ import (
 
 type Config struct {
 	AllowedUnits []string `yaml:"allowed_units"`
+	ServerKey    string   `yaml:"server_key,omitempty"`
+	ListenAddr   string   `yaml:"listen_addr,omitempty"`
 }
 
-func loadConfig() (map[string]struct{}, error) {
+type APIResponse struct {
+	OK    bool        `json:"ok"`
+	Error string      `json:"error,omitempty"`
+	Data  interface{} `json:"data,omitempty"`
+}
+
+type UnitInfo struct {
+	Unit   string      `json:"unit"`
+	Active interface{} `json:"active,omitempty"`
+	Sub    interface{} `json:"sub,omitempty"`
+	Error  string      `json:"error,omitempty"`
+}
+
+type UnitActionRequest struct {
+	Unit string `json:"unit"`
+}
+
+type UnitActionResponse struct {
+	Unit   string `json:"unit"`
+	Result string `json:"result,omitempty"`
+}
+
+var (
+	allowedUnits map[string]struct{}
+	serverKey    string
+)
+
+func loadConfig() (*Config, error) {
 	return loadConfigFrom("/etc/media-pi-agent/agent.yaml")
 }
 
-// loadConfigFrom читает конфигурацию из указанного пути (useful for tests)
-func loadConfigFrom(path string) (map[string]struct{}, error) {
+func loadConfigFrom(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -34,134 +67,390 @@ func loadConfigFrom(path string) (map[string]struct{}, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, err
 	}
-	allow := make(map[string]struct{}, len(c.AllowedUnits))
+
+	allowedUnits = make(map[string]struct{}, len(c.AllowedUnits))
 	for _, u := range c.AllowedUnits {
-		allow[u] = struct{}{}
+		allowedUnits[u] = struct{}{}
 	}
-	return allow, nil
+
+	serverKey = c.ServerKey
+	if serverKey == "" {
+		return nil, fmt.Errorf("server_key is required in configuration")
+	}
+
+	return &c, nil
 }
 
-func allowed(allow map[string]struct{}, unit string) error {
-	if _, ok := allow[unit]; !ok {
+func generateServerKey() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+func setupConfig(configPath string) error {
+	if _, err := os.Stat(configPath); err == nil {
+		return fmt.Errorf("configuration already exists at %s", configPath)
+	}
+
+	key, err := generateServerKey()
+	if err != nil {
+		return fmt.Errorf("failed to generate server key: %w", err)
+	}
+
+	config := Config{
+		AllowedUnits: []string{
+			"mnt-usb.mount",
+			"mnt-ya.disk.mount",
+			"mnt-ya.disk.automount",
+			"playlist.upload.service",
+			"video.upload.service",
+			"playlist.upload.timer",
+			"video.upload.timer",
+			"play.video.service",
+		},
+		ServerKey:  key,
+		ListenAddr: "0.0.0.0:8080",
+	}
+
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	fmt.Printf("Configuration created at %s\n", configPath)
+	fmt.Printf("Server key: %s\n", key)
+	fmt.Println("Please save this key securely - it will be required for API access")
+
+	return nil
+}
+
+func isAllowed(unit string) error {
+	if _, ok := allowedUnits[unit]; !ok {
 		return fmt.Errorf("unit %q is not allowed", unit)
 	}
 	return nil
 }
 
-func fatalJSON(err error) {
-	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"ok":    false,
-		"error": err.Error(),
-	})
-	os.Exit(1)
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+
+		if !strings.HasPrefix(auth, "Bearer ") {
+			http.Error(w, "Bearer token required", http.StatusUnauthorized)
+			return
+		}
+
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(serverKey)) != 1 {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
-func main() {
-	log.SetFlags(0)
+func jsonResponse(w http.ResponseWriter, status int, response APIResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(response)
+}
 
-	if len(os.Args) < 2 {
-		fmt.Println(`Usage: media-pi-agent <list|status|start|stop|restart|enable|disable> [unit]`)
-		os.Exit(2)
-	}
-
-	cmd := os.Args[1]
-	allow, err := loadConfig()
-	if err != nil {
-		fatalJSON(fmt.Errorf("config: %w", err))
+func handleListUnits(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:    false,
+			Error: "Method not allowed",
+		})
+		return
 	}
 
 	conn, err := dbus.NewWithContext(context.Background())
 	if err != nil {
-		fatalJSON(fmt.Errorf("dbus: %w", err))
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:    false,
+			Error: fmt.Sprintf("dbus connection failed: %v", err),
+		})
+		return
 	}
 	defer conn.Close()
 
-	switch cmd {
-	case "list":
-		// For each allowed unit, gather the same status information as the "status" command
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-		type unitInfo struct {
-			Unit   string      `json:"unit"`
-			Active interface{} `json:"active,omitempty"`
-			Sub    interface{} `json:"sub,omitempty"`
-			Error  string      `json:"error,omitempty"`
+	var infos []UnitInfo
+	for unit := range allowedUnits {
+		props, err := conn.GetUnitPropertiesContext(ctx, unit)
+		if err != nil {
+			infos = append(infos, UnitInfo{Unit: unit, Error: err.Error()})
+			continue
 		}
-
-		var infos []unitInfo
-		for u := range allow {
-			props, err := conn.GetUnitPropertiesContext(ctx, u)
-			if err != nil {
-				infos = append(infos, unitInfo{Unit: u, Error: err.Error()})
-				continue
-			}
-			infos = append(infos, unitInfo{Unit: u, Active: props["ActiveState"], Sub: props["SubState"]})
-		}
-
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"ok":    true,
-			"units": infos,
+		infos = append(infos, UnitInfo{
+			Unit:   unit,
+			Active: props["ActiveState"],
+			Sub:    props["SubState"],
 		})
-	case "status", "start", "stop", "restart", "enable", "disable":
-		if len(os.Args) < 3 {
-			fatalJSON(errors.New("missing unit"))
+	}
+
+	jsonResponse(w, http.StatusOK, APIResponse{
+		OK:   true,
+		Data: infos,
+	})
+}
+
+func handleUnitStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:    false,
+			Error: "Method not allowed",
+		})
+		return
+	}
+
+	unit := r.URL.Query().Get("unit")
+	if unit == "" {
+		jsonResponse(w, http.StatusBadRequest, APIResponse{
+			OK:    false,
+			Error: "unit parameter is required",
+		})
+		return
+	}
+
+	if err := isAllowed(unit); err != nil {
+		jsonResponse(w, http.StatusForbidden, APIResponse{
+			OK:    false,
+			Error: err.Error(),
+		})
+		return
+	}
+
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:    false,
+			Error: fmt.Sprintf("dbus connection failed: %v", err),
+		})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	props, err := conn.GetUnitPropertiesContext(ctx, unit)
+	if err != nil {
+		jsonResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:    false,
+			Error: err.Error(),
+		})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: UnitInfo{
+			Unit:   unit,
+			Active: props["ActiveState"],
+			Sub:    props["SubState"],
+		},
+	})
+}
+
+func handleUnitAction(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
+				OK:    false,
+				Error: "Method not allowed",
+			})
+			return
 		}
-		unit := os.Args[2]
-		if err := allowed(allow, unit); err != nil {
-			fatalJSON(err)
+
+		var req UnitActionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{
+				OK:    false,
+				Error: "Invalid JSON body",
+			})
+			return
 		}
+
+		if req.Unit == "" {
+			jsonResponse(w, http.StatusBadRequest, APIResponse{
+				OK:    false,
+				Error: "unit field is required",
+			})
+			return
+		}
+
+		if err := isAllowed(req.Unit); err != nil {
+			jsonResponse(w, http.StatusForbidden, APIResponse{
+				OK:    false,
+				Error: err.Error(),
+			})
+			return
+		}
+
+		conn, err := dbus.NewWithContext(context.Background())
+		if err != nil {
+			jsonResponse(w, http.StatusInternalServerError, APIResponse{
+				OK:    false,
+				Error: fmt.Sprintf("dbus connection failed: %v", err),
+			})
+			return
+		}
+		defer conn.Close()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		switch cmd {
-		case "status":
-			props, err := conn.GetUnitPropertiesContext(ctx, unit)
-			if err != nil {
-				fatalJSON(err)
-			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-				"ok":     true,
-				"unit":   unit,
-				"active": props["ActiveState"],
-				"sub":    props["SubState"],
-			})
+		var result string
+		var actionErr error
+
+		switch action {
 		case "start":
 			ch := make(chan string, 1)
-			_, err = conn.StartUnitContext(ctx, unit, "replace", ch)
-			if err != nil {
-				fatalJSON(err)
+			_, actionErr = conn.StartUnitContext(ctx, req.Unit, "replace", ch)
+			if actionErr == nil {
+				result = <-ch
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "unit": unit, "result": <-ch})
 		case "stop":
 			ch := make(chan string, 1)
-			_, err = conn.StopUnitContext(ctx, unit, "replace", ch)
-			if err != nil {
-				fatalJSON(err)
+			_, actionErr = conn.StopUnitContext(ctx, req.Unit, "replace", ch)
+			if actionErr == nil {
+				result = <-ch
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "unit": unit, "result": <-ch})
 		case "restart":
 			ch := make(chan string, 1)
-			_, err = conn.RestartUnitContext(ctx, unit, "replace", ch)
-			if err != nil {
-				fatalJSON(err)
+			_, actionErr = conn.RestartUnitContext(ctx, req.Unit, "replace", ch)
+			if actionErr == nil {
+				result = <-ch
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "unit": unit, "result": <-ch})
 		case "enable":
-			_, _, err = conn.EnableUnitFilesContext(ctx, []string{unit}, false, true)
-			if err != nil {
-				fatalJSON(err)
+			_, _, actionErr = conn.EnableUnitFilesContext(ctx, []string{req.Unit}, false, true)
+			if actionErr == nil {
+				result = "enabled"
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "unit": unit, "enabled": true})
 		case "disable":
-			_, err = conn.DisableUnitFilesContext(ctx, []string{unit}, false)
-			if err != nil {
-				fatalJSON(err)
+			_, actionErr = conn.DisableUnitFilesContext(ctx, []string{req.Unit}, false)
+			if actionErr == nil {
+				result = "disabled"
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "unit": unit, "enabled": false})
+		default:
+			jsonResponse(w, http.StatusBadRequest, APIResponse{
+				OK:    false,
+				Error: fmt.Sprintf("unknown action: %s", action),
+			})
+			return
 		}
-	default:
-		fatalJSON(fmt.Errorf("unknown command %q", cmd))
+
+		if actionErr != nil {
+			jsonResponse(w, http.StatusInternalServerError, APIResponse{
+				OK:    false,
+				Error: actionErr.Error(),
+			})
+			return
+		}
+
+		jsonResponse(w, http.StatusOK, APIResponse{
+			OK: true,
+			Data: UnitActionResponse{
+				Unit:   req.Unit,
+				Result: result,
+			},
+		})
+	}
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:    false,
+			Error: "Method not allowed",
+		})
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: map[string]string{
+			"status": "healthy",
+			"time":   time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		configPath := "/etc/media-pi-agent/agent.yaml"
+		if len(os.Args) > 2 {
+			configPath = os.Args[2]
+		}
+		if err := setupConfig(configPath); err != nil {
+			log.Fatalf("Setup failed: %v", err)
+		}
+		return
+	}
+
+	config, err := loadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	mux := http.NewServeMux()
+
+	// Public health endpoint
+	mux.HandleFunc("/health", handleHealth)
+
+	// Protected API endpoints
+	mux.HandleFunc("/api/units", authMiddleware(handleListUnits))
+	mux.HandleFunc("/api/units/status", authMiddleware(handleUnitStatus))
+	mux.HandleFunc("/api/units/start", authMiddleware(handleUnitAction("start")))
+	mux.HandleFunc("/api/units/stop", authMiddleware(handleUnitAction("stop")))
+	mux.HandleFunc("/api/units/restart", authMiddleware(handleUnitAction("restart")))
+	mux.HandleFunc("/api/units/enable", authMiddleware(handleUnitAction("enable")))
+	mux.HandleFunc("/api/units/disable", authMiddleware(handleUnitAction("disable")))
+
+	listenAddr := config.ListenAddr
+	if listenAddr == "" {
+		listenAddr = "0.0.0.0:8080"
+	}
+	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
+	log.Printf("API endpoints:")
+	log.Printf("  GET  /health - Health check (no auth)")
+	log.Printf("  GET  /api/units - List all units")
+	log.Printf("  GET  /api/units/status?unit=<name> - Get unit status")
+	log.Printf("  POST /api/units/start - Start unit")
+	log.Printf("  POST /api/units/stop - Stop unit")
+	log.Printf("  POST /api/units/restart - Restart unit")
+	log.Printf("  POST /api/units/enable - Enable unit")
+	log.Printf("  POST /api/units/disable - Disable unit")
+
+	server := &http.Server{
+		Addr:         listenAddr,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatalf("Server failed: %v", err)
 	}
 }

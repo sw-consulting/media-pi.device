@@ -37,10 +37,12 @@ rm -rf "${WORK}"
 # - /usr/local/bin      -> исполняемый бинарник
 # - /etc/media-pi-agent -> конфигурация (agent.yaml)
 # - /etc/polkit-1/rules.d -> правило polkit (сгенерированное)
+# - /etc/systemd/system -> systemd service файл
 # - ${WORK}/DEBIAN      -> метаданные пакета (control, conffiles, postinst)
 mkdir -p "${ROOT}/usr/local/bin"
 mkdir -p "${ROOT}/etc/media-pi-agent"
 mkdir -p "${ROOT}/etc/polkit-1/rules.d"
+mkdir -p "${ROOT}/etc/systemd/system"
 mkdir -p "${WORK}/DEBIAN"
 
 # Копируем содержимое пакета (payload)
@@ -55,6 +57,12 @@ install -m 0644 "${SCRIPT_DIR}/agent.yaml" "${ROOT}/etc/media-pi-agent/agent.yam
 
 # setup-media-pi.sh --> /usr/local/bin
 install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bin/setup-media-pi.sh"
+
+# uninstall-media-pi.sh --> /usr/local/bin
+install -m 0755 "${SCRIPT_DIR}/../setup/uninstall-media-pi.sh" "${ROOT}/usr/local/bin/uninstall-media-pi.sh"
+
+# systemd service file --> /etc/systemd/system
+install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
 # Генерация правила polkit на этапе сборки.
 # Пояснение: polkit-правила выполняются в изолированной JS-среде и
@@ -116,6 +124,7 @@ EOF
 cat > "${WORK}/DEBIAN/conffiles" <<EOF
 /etc/media-pi-agent/agent.yaml
 /etc/polkit-1/rules.d/90-media-pi-agent.rules
+/etc/systemd/system/media-pi-agent.service
 EOF
 
 # Control file
@@ -127,8 +136,9 @@ Priority: optional
 Architecture: ${ARCH}
 Maintainer: Maxim Samsonov <maxirmx@sw.consulting>
 Depends: dbus, policykit-1, systemd
-Description: Media Pi agent via D-Bus for Raspberry Pi
- Provides media-pi-agent CLI to list/status/start/stop whitelisted units via system bus.
+Description: Media Pi Agent REST Service for Raspberry Pi
+ Provides REST API to manage whitelisted systemd units via HTTP endpoints.
+ Includes authentication and runs as a systemd service.
 EOF
 
 # Postinst: выполняется после установки пакета. 
@@ -142,6 +152,12 @@ getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || t
 # можно раскомментировать следующую строку (по соображениям безопасности
 # это оставлено на усмотрение администратора):
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
+
+# Reload systemd and enable the service
+systemctl daemon-reload || true
+systemctl enable media-pi-agent.service || true
+echo "Media Pi Agent REST service installed. Use 'media-pi-agent setup' to configure."
+echo "Then start with: systemctl start media-pi-agent"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"

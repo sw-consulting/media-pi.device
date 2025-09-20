@@ -10,4 +10,9 @@ allowed_units:
   - playlist.upload.timer 
   - video.upload.timer
   - play.video.service
-  
+
+# Server key for API authentication (generate with: media-pi-agent setup)
+server_key: ""
+
+# Listen address for REST API
+listen_addr: "0.0.0.0:8080"
