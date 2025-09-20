@@ -111,7 +111,7 @@ func setupConfig(configPath string) error {
 			return fmt.Errorf("failed to parse existing config: %w", err)
 		}
 		if config.ServerKey != "" {
-			return fmt.Errorf("configuration at %s already has a server_key; delete or clear it before running setup", configPath)
+			fmt.Printf("Warning: configuration at %s already has a server_key; it will be overwritten\n", configPath)
 		}
 		if config.ListenAddr == "" {
 			config.ListenAddr = defaultListenAddr
@@ -148,7 +148,7 @@ func setupConfig(configPath string) error {
 		fmt.Printf("Configuration created at %s\n", configPath)
 	}
 	fmt.Printf("Server key: %s\n", key)
-	fmt.Println("Please save this key securely - it will be required for API access")
+	fmt.Println("The key saved at agent configuration file, it will be used for API access")
 
 	return nil
 }

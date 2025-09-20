@@ -16,9 +16,17 @@ AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 
 echo "Setting up Media Pi Agent REST Service..."
 
-# Install required packages
-apt-get update
-apt-get install -y curl jq
+# Dependencies (curl, jq) are provided by package dependencies
+# Verify they are available
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Error: curl is not available. Please install it: apt-get install curl" >&2
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is not available. Please install it: apt-get install jq" >&2
+  exit 1
+fi
 
 # Generate media-pi-agent configuration with server key
 echo "Generating media-pi-agent configuration..."
@@ -62,7 +70,7 @@ echo "  Agent Port: ${AGENT_PORT}"
 # Register device with central server
 echo "Registering device at ${CORE_API_BASE}/devices/register ..."
 if ! RESP=$(
-  curl -sS --fail-with-body -X POST "${CORE_API_BASE}/devices/register" \
+  curl -sS  -X POST "${CORE_API_BASE}/devices/register" \
     -H 'Content-Type: application/json' \
     -d @<(jq -n --arg sk "$SERVER_KEY" \
               --arg hn "$HOSTNAME" \
