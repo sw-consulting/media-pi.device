@@ -72,7 +72,7 @@ echo "Registering device at ${CORE_API_BASE}/api/devices/register ..."
 
 # Use curl with -w flag to capture HTTP status code
 HTTP_STATUS=$(curl -sS -w "%{http_code}" -o /tmp/registration_response.json \
-  -X POST "${CORE_API_BASE}/devices/register" \
+  -X POST "${CORE_API_BASE}/api/devices/register" \
   -H 'Content-Type: application/json' \
   -d @<(jq -n --arg sk "$SERVER_KEY" \
             --arg hn "$HOSTNAME" \
