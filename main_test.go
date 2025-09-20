@@ -98,7 +98,9 @@ func TestAuthMiddleware(t *testing.T) {
 
 	handler := authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("authorized"))
+		if _, err := w.Write([]byte("authorized")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	})
 
 	// Test without auth header

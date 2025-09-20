@@ -167,7 +167,9 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func jsonResponse(w http.ResponseWriter, status int, response APIResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Failed to encode JSON response: %v", err)
+	}
 }
 
 func handleListUnits(w http.ResponseWriter, r *http.Request) {
