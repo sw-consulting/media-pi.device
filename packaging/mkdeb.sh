@@ -153,11 +153,13 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
-# Reload systemd and enable the service
-systemctl daemon-reload || true
-systemctl enable media-pi-agent.service || true
-echo "Media Pi Agent REST service installed. Use 'setup-media-pi.sh' to configure,"
-echo "uninstall-media-pi.sh to remove"
+echo "Media Pi Agent installed successfully."
+echo ""
+echo "Next steps:"
+echo "1. Set CORE_API_BASE environment variable to point to your management server"
+echo "2. Run: sudo -E setup-media-pi.sh"
+echo ""
+echo "For uninstallation, run: sudo uninstall-media-pi.sh"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"

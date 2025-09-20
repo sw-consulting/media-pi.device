@@ -170,7 +170,6 @@ func setupConfig(configPath string) error {
 	} else {
 		fmt.Printf("Configuration created at %s\n", configPath)
 	}
-	fmt.Printf("Server key: %s\n", key)
 	fmt.Println("The key is saved in the agent configuration file, it will be used for API access")
 
 	return nil
