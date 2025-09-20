@@ -33,7 +33,7 @@ if [[ ! -f "${AGENT_CONFIG_PATH}" ]]; then
   exit 1
 fi
 
-SERVER_KEY=$(grep '^server_key:' "${AGENT_CONFIG_PATH}" | sed 's/^server_key: *"\?\([^"]*\)"\?$/\1/' | tr -d '"')
+SERVER_KEY=$(grep '^server_key:' "${AGENT_CONFIG_PATH}" | sed 's/^server_key: *"\?\([^"]*\)"\?$/\1/')
 if [[ -z "${SERVER_KEY}" ]]; then
   echo "Error: Could not extract server_key from configuration" >&2
   exit 1
@@ -48,7 +48,7 @@ AGENT_PORT=8080
 
 # Extract port from configuration if specified
 if grep -q '^listen_addr:' "${AGENT_CONFIG_PATH}"; then
-  LISTEN_ADDR=$(grep '^listen_addr:' "${AGENT_CONFIG_PATH}" | sed 's/^listen_addr: *"\?\([^"]*\)"\?$/\1/' | tr -d '"')
+  LISTEN_ADDR=$(grep '^listen_addr:' "${AGENT_CONFIG_PATH}" | sed 's/^listen_addr: *"\?\([^"]*\)"\?$/\1/')
   if [[ "${LISTEN_ADDR}" =~ :([0-9]+)$ ]]; then
     AGENT_PORT="${BASH_REMATCH[1]}"
   fi
