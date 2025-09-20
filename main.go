@@ -35,11 +35,6 @@ type APIResponse struct {
 	Data   interface{} `json:"data,omitempty"`
 }
 
-// ErrMessage represents a minimal JSON error payload returned on failures.
-type ErrMessage struct {
-	Msg string `json:"msg"`
-}
-
 type UnitInfo struct {
 	Unit   string      `json:"unit"`
 	Active interface{} `json:"active,omitempty"`
