@@ -202,11 +202,40 @@ func TestSetupConfig(t *testing.T) {
 		if cfg.ServerKey == "" {
 			t.Fatalf("expected server key to be generated")
 		}
-		if len(cfg.AllowedUnits) == 0 {
-			t.Fatalf("expected default allowed units")
+		if len(cfg.AllowedUnits) != 0 {
+			t.Fatalf("expected no default allowed units, got %#v", cfg.AllowedUnits)
 		}
 		if cfg.ListenAddr != defaultListenAddr {
 			t.Fatalf("expected listen addr %q, got %q", defaultListenAddr, cfg.ListenAddr)
+		}
+	})
+
+	t.Run("keeps allowed units empty when not specified", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "agent.yaml")
+		existingYAML := "listen_addr: \"127.0.0.1:9000\"\n"
+		if err := os.WriteFile(configPath, []byte(existingYAML), 0600); err != nil {
+			t.Fatalf("write existing config: %v", err)
+		}
+
+		if err := setupConfig(configPath); err != nil {
+			t.Fatalf("setupConfig: %v", err)
+		}
+
+		updatedData, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read updated config: %v", err)
+		}
+
+		var updated Config
+		if err := yaml.Unmarshal(updatedData, &updated); err != nil {
+			t.Fatalf("unmarshal updated config: %v", err)
+		}
+
+		if len(updated.AllowedUnits) != 0 {
+			t.Fatalf("expected allowed units to remain empty, got %#v", updated.AllowedUnits)
+		}
+		if updated.ListenAddr != "127.0.0.1:9000" {
+			t.Fatalf("expected listen addr to be preserved, got %q", updated.ListenAddr)
 		}
 	})
 

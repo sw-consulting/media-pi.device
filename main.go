@@ -53,24 +53,13 @@ type UnitActionResponse struct {
 var (
 	allowedUnits map[string]struct{}
 	serverKey    string
-
-	defaultAllowedUnits = []string{
-		"mnt-usb.mount",
-		"mnt-ya.disk.mount",
-		"mnt-ya.disk.automount",
-		"playlist.upload.service",
-		"video.upload.service",
-		"playlist.upload.timer",
-		"video.upload.timer",
-		"play.video.service",
-	}
 )
 
 const defaultListenAddr = "0.0.0.0:8080"
 
 func defaultConfig() Config {
 	return Config{
-		AllowedUnits: append([]string(nil), defaultAllowedUnits...),
+		AllowedUnits: []string{},
 		ListenAddr:   defaultListenAddr,
 	}
 }
@@ -123,9 +112,6 @@ func setupConfig(configPath string) error {
 		}
 		if config.ServerKey != "" {
 			return fmt.Errorf("configuration at %s already has a server_key; delete or clear it before running setup", configPath)
-		}
-		if len(config.AllowedUnits) == 0 {
-			config.AllowedUnits = append([]string(nil), defaultAllowedUnits...)
 		}
 		if config.ListenAddr == "" {
 			config.ListenAddr = defaultListenAddr
