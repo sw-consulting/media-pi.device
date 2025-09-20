@@ -4,7 +4,24 @@
 
 set -euo pipefail
 
-# Определяем директорию скрипта (SCRIPT_DIR). Это нужно, чтобы
+# Определяем директорию # Postinst: выполняется после установки пакета. 
+# Убеждаемся, что существует опциональная системная группа svc-ops.
+# Если группа уже есть, ошибки не будет
+cat > "${WORK}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
+id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
+
+echo "Media Pi Agent installed successfully."
+echo ""
+echo "Next steps:"
+echo "1. Set CORE_API_BASE environment variable to point to your management server"
+echo "2. Run: sudo -E setup-media-pi.sh"
+echo ""
+echo "For uninstallation, run: sudo uninstall-media-pi.sh"
+exit 0
+EOFDIR). Это нужно, чтобы
 # корректно находить файлы в каталоге packaging, даже если mkdeb.sh
 # запускают из другой текущей рабочей директории.
 # ${BASH_SOURCE[0]} — путь к самому скрипту; обёртка с cd...pwd даёт
@@ -151,19 +168,37 @@ cat > "${WORK}/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
-# Если хотите автоматически добавлять пользователя 'pi' в эту группу,
-# можно раскомментировать следующую строку (по соображениям безопасности
-# это оставлено на усмотрение администратора):
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
 # Reload systemd and enable the service
 systemctl daemon-reload || true
 systemctl enable media-pi-agent.service || true
-echo "Media Pi Agent REST service installed. Use 'media-pi-agent setup' to configure."
-echo "Then start with: systemctl start media-pi-agent"
+echo "Media Pi Agent REST service installed. Use 'setup-media-pi.sh' to configure,"
+echo "uninstall-media-pi.sh to remove"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"
+
+# Prerm: выполняется перед удалением пакета
+# Останавливает и отключает сервис если он был запущен
+cat > "${WORK}/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+set -e
+
+# Stop and disable service if running
+if systemctl is-active --quiet media-pi-agent.service 2>/dev/null; then
+    echo "Stopping media-pi-agent service..."
+    systemctl stop media-pi-agent.service || true
+fi
+
+if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
+    echo "Disabling media-pi-agent service..."
+    systemctl disable media-pi-agent.service || true
+fi
+
+exit 0
+EOF
+chmod 0755 "${WORK}/DEBIAN/prerm"
 
 # Build .deb
 OUT="build/${PKG}_${VERSION}_${ARCH}.deb"

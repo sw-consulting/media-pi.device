@@ -77,7 +77,7 @@ HTTP_STATUS=$(curl -sS -w "%{http_code}" -o /tmp/registration_response.json \
   -d @<(jq -n --arg sk "$SERVER_KEY" \
             --arg hn "$HOSTNAME" \
             --arg ip "$DEVICE_IP" \
-            --argjson port "$AGENT_PORT" \
+            --arg port "$AGENT_PORT" \
             '{ serverKey: $sk, name: $hn, ipAddress: $ip, port: $port }') \
   2>/dev/null || echo "000")
 
