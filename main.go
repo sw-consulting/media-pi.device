@@ -182,7 +182,7 @@ func setupConfig(configPath string) error {
 
 func isAllowed(unit string) error {
 	if _, ok := allowedUnits[unit]; !ok {
-		return fmt.Errorf("Управление сервисом %q запрещено", unit)
+		return fmt.Errorf("управление сервисом %q запрещено", unit)
 	}
 	return nil
 }
