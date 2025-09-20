@@ -237,10 +237,5 @@ chmod 0755 "${WORK}/DEBIAN/prerm"
 # Build .deb
 OUT="build/${PKG}_${VERSION}_${ARCH}.deb"
 
-# Ensure proper permissions on all files and directories
-find "${WORK}" -type d -exec chmod 755 {} \;
-find "${WORK}" -type f -exec chmod 644 {} \;
-chmod 755 "${WORK}/DEBIAN"/*
-
 dpkg-deb -Zxz --build "${WORK}" "${OUT}"
 echo "Built ${OUT}"
