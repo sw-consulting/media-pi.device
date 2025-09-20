@@ -4,25 +4,7 @@
 
 set -euo pipefail
 
-# Определяем директорию
-# Postinst: выполняется после установки пакета.
-# Убеждаемся, что существует опциональная системная группа svc-ops.
-# Если группа уже есть, ошибки не будет
-cat > "${WORK}/DEBIAN/postinst" <<'EOF'
-#!/bin/sh
-set -e
-getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
-id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
-echo "Media Pi Agent installed successfully."
-echo ""
-echo "Next steps:"
-echo "1. Set CORE_API_BASE environment variable to point to your management server"
-echo "2. Run: sudo -E setup-media-pi.sh"
-echo ""
-echo "For uninstallation, run: sudo uninstall-media-pi.sh"
-exit 0
-EOF
 # Это нужно, чтобы корректно находить файлы скрипта (SCRIPT_DIR) в каталоге packaging, даже если mkdeb.sh
 # запускают из другой текущей рабочей директории.
 # ${BASH_SOURCE[0]} — путь к самому скрипту; обёртка с cd...pwd даёт

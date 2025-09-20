@@ -37,23 +37,6 @@ The installation process is split into two distinct phases to avoid duplication 
 | Stop running service | `.deb` prerm | `dpkg -r` | Before package removal |
 | Disable systemd service | `.deb` prerm | `dpkg -r` | Clean uninstall |
 
-## Benefits of This Architecture
-
-### ✅ **Advantages**
-
-1. **No Service Duplication**: Each task has a single responsible component
-2. **Robust Package Installation**: No systemctl failures during `dpkg -i` 
-3. **User Control**: Service only starts when user explicitly configures it
-4. **Environment-Specific Setup**: `CORE_API_BASE` set at configuration time
-5. **Atomic Operations**: Configuration either fully succeeds or fails cleanly
-6. **Clean Uninstall**: Package removal properly stops and disables service
-
-### 🚫 **Previous Problems (Now Solved)**
-
-- ❌ Service enabled twice (postinst + setup script)
-- ❌ systemctl commands could fail during package installation
-- ❌ Service might start without proper configuration
-- ❌ Unclear responsibility boundaries
 
 ## Installation Workflow
 
@@ -156,13 +139,3 @@ The `.deb` package includes these automatically generated files:
 - Service runs as dedicated user (configured in systemd unit)
 - API authentication required for all management endpoints
 - Polkit rules restrict systemd unit access to authorized users
-
-## Future Enhancements
-
-Possible improvements to the installation architecture:
-
-1. **Configuration Validation**: Pre-flight checks before service start
-2. **Rollback Support**: Automatic rollback on configuration failure  
-3. **Multiple Environments**: Support for dev/staging/prod configurations
-4. **Health Monitoring**: Built-in service health reporting
-5. **Auto-Updates**: Self-updating capability with proper validation
