@@ -7,10 +7,10 @@ set -euo pipefail
 ### --- CONFIG: can be set via environment variables ---
 # You can override these by setting them in the shell before running the script,
 # for example:
-#   CORE_API_BASE="https://example.com/api"  sudo /usr/local/bin/setup-media-pi.sh
+#   CORE_API_BASE="https://example.com"  sudo /usr/local/bin/setup-media-pi.sh
 # or (if already root):
-#   CORE_API_BASE="https://example.com/api"  /usr/local/bin/setup-media-pi.sh
-CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8086/api}"
+#   CORE_API_BASE="https://example.com"  /usr/local/bin/setup-media-pi.sh
+CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8086}"
 AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 ### ---------------------------------------------
 
@@ -68,7 +68,7 @@ echo "  IP Address: ${DEVICE_IP}"
 echo "  Agent Port: ${AGENT_PORT}"
 
 # Register device with central server
-echo "Registering device at ${CORE_API_BASE}/devices/register ..."
+echo "Registering device at ${CORE_API_BASE}/api/devices/register ..."
 
 # Use curl with -w flag to capture HTTP status code
 HTTP_STATUS=$(curl -sS -w "%{http_code}" -o /tmp/registration_response.json \
