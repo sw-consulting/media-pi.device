@@ -151,8 +151,6 @@ jobs:
             test -x /usr/local/bin/media-pi-agent
             test -f /usr/local/bin/setup-media-pi.sh
             test -x /usr/local/bin/setup-media-pi.sh
-            test -f /usr/local/bin/uninstall-media-pi.sh
-            test -x /usr/local/bin/uninstall-media-pi.sh
             test -f /etc/media-pi-agent/agent.yaml
             test -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
             test -f /etc/systemd/system/media-pi-agent.service
@@ -169,12 +167,11 @@ jobs:
             
             # Test uninstall script (non-interactive mode)
             echo "Testing uninstall script..."
-            if echo -e "n\nn" | /usr/local/bin/uninstall-media-pi.sh >/tmp/uninstall.out 2>&1; then
+            if echo -e "n\nn" | dpkg -r media-pi-agent >/tmp/uninstall.out 2>&1; then
               echo "Uninstall script executed successfully"
               # Verify that binaries are removed
               test ! -f /usr/local/bin/media-pi-agent
               test ! -f /usr/local/bin/setup-media-pi.sh
-              test ! -f /usr/local/bin/uninstall-media-pi.sh
               # Verify that systemd service file is removed
               test ! -f /etc/systemd/system/media-pi-agent.service
               # Verify that polkit rules are removed

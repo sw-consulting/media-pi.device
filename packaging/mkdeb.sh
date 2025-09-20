@@ -58,9 +58,6 @@ install -m 0644 "${SCRIPT_DIR}/agent.yaml" "${ROOT}/etc/media-pi-agent/agent.yam
 # setup-media-pi.sh --> /usr/local/bin
 install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bin/setup-media-pi.sh"
 
-# uninstall-media-pi.sh --> /usr/local/bin
-install -m 0755 "${SCRIPT_DIR}/../setup/uninstall-media-pi.sh" "${ROOT}/usr/local/bin/uninstall-media-pi.sh"
-
 # systemd service file --> /etc/systemd/system
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
@@ -159,7 +156,7 @@ echo "Next steps:"
 echo "1. Set CORE_API_BASE environment variable to point to your management server"
 echo "2. Run: sudo -E setup-media-pi.sh"
 echo ""
-echo "For uninstallation, run: sudo uninstall-media-pi.sh"
+echo "For uninstallation, run: sudo dpkg -r media-pi-agent"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"

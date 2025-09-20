@@ -143,9 +143,3 @@ sudo dpkg -r media-pi-agent
 # Удалить конфигурацию (опционально)
 sudo rm -rf /etc/media-pi-agent/
 ```
-
-Или используйте скрипт удаления:
-
-```bash
-sudo uninstall-media-pi.sh
-```

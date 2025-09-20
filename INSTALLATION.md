@@ -127,7 +127,6 @@ The `.deb` package includes these automatically generated files:
 |----------------|---------|-------|-------------|
 | `/usr/local/bin/media-pi-agent` | Main binary | root:root | 755 |
 | `/usr/local/bin/setup-media-pi.sh` | Setup script | root:root | 755 |
-| `/usr/local/bin/uninstall-media-pi.sh` | Uninstall script | root:root | 755 |
 | `/etc/media-pi-agent/agent.yaml` | Configuration | root:root | 644 |
 | `/etc/systemd/system/media-pi-agent.service` | Systemd unit | root:root | 644 |
 | `/etc/polkit-1/rules.d/90-media-pi-agent.rules` | Polkit rules | root:root | 644 |
