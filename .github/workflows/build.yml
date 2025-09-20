@@ -1,7 +1,7 @@
 # Copyright (c) 2025 sw.consulting
 # This file is a part of Media Pi device agent
 
-name: Build & Package media-pi-agent
+name: Build & Package Media Pi Agent REST Service
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'
@@ -40,7 +40,7 @@ jobs:
       - name: Run unit tests
         if: matrix.target.name == 'arm64'
         run: |
-          go test ./...
+          go test -v ./...
 
       - name: Build agent
         run: |
@@ -135,21 +135,46 @@ jobs:
           docker run --rm --platform linux/arm64 -v "$PKGDIR":/pkgs:ro ubuntu:24.04 bash -xe -o pipefail <<'BASH'
             set -euo pipefail
             apt-get update -y
-            apt-get install -y --no-install-recommends dpkg coreutils
+            apt-get install -y --no-install-recommends dpkg coreutils systemd
             dpkg -i /pkgs/$BASENAME || true
             test -f /usr/local/bin/media-pi-agent
             test -x /usr/local/bin/media-pi-agent
             test -f /usr/local/bin/setup-media-pi.sh
             test -x /usr/local/bin/setup-media-pi.sh
+            test -f /usr/local/bin/uninstall-media-pi.sh
+            test -x /usr/local/bin/uninstall-media-pi.sh
             test -f /etc/media-pi-agent/agent.yaml
             test -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
-            tried=0
-            for flag in --help -h --version -v; do
-              if /usr/local/bin/media-pi-agent "$flag" >/tmp/agent.out 2>&1; then
-                echo "agent responded successfully to $flag"; tried=1; break; fi
-            done
-            if [ "$tried" -eq 0 ]; then
-              /usr/local/bin/media-pi-agent --help || true
+            test -f /etc/systemd/system/media-pi-agent.service
+            # Test setup command
+            if /usr/local/bin/media-pi-agent setup /tmp/test-config.yaml >/tmp/setup.out 2>&1; then
+              echo "Setup command works"
+              test -f /tmp/test-config.yaml
+              grep -q "server_key:" /tmp/test-config.yaml
+            else
+              echo "Setup command failed"
+              cat /tmp/setup.out
+              exit 2
+            fi
+            
+            # Test uninstall script (non-interactive mode)
+            echo "Testing uninstall script..."
+            if echo -e "n\nn" | /usr/local/bin/uninstall-media-pi.sh >/tmp/uninstall.out 2>&1; then
+              echo "Uninstall script executed successfully"
+              # Verify that binaries are removed
+              test ! -f /usr/local/bin/media-pi-agent
+              test ! -f /usr/local/bin/setup-media-pi.sh
+              test ! -f /usr/local/bin/uninstall-media-pi.sh
+              # Verify that systemd service file is removed
+              test ! -f /etc/systemd/system/media-pi-agent.service
+              # Verify that polkit rules are removed
+              test ! -f /etc/polkit-1/rules.d/90-media-pi-agent.rules
+              # Verify that config is preserved (answered 'n' to removal)
+              test -d /etc/media-pi-agent
+              echo "Uninstall verification passed"
+            else
+              echo "Uninstall script failed"
+              cat /tmp/uninstall.out
               exit 2
             fi
             echo "Integration (arm64/QEMU) checks passed"
@@ -172,4 +197,3 @@ jobs:
             dist-all/**/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-

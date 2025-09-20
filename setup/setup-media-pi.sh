@@ -11,85 +11,112 @@ set -euo pipefail
 # or (if already root):
 #   CORE_API_BASE="https://example.com/api"  /usr/local/bin/setup-media-pi.sh
 CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8086/api}"
-SSH_USER_ON_PI="pi"  # user on the device under which the agent runs, shall match mkdeb.sh postinst
+AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 ### ---------------------------------------------
 
-SSH_KEY_PATH="/home/${SSH_USER_ON_PI}/.ssh"
-PUBKEY_PATH="${SSH_KEY_PATH}/id_ed25519.pub"
-PRIVKEY_PATH="${SSH_KEY_PATH}/id_ed25519"
-AUTHORIZED_KEYS_PATH="${SSH_KEY_PATH}/authorized_keys"
+echo "Setting up Media Pi Agent REST Service..."
 
+# Install required packages
 apt-get update
-apt-get install -y curl openssh-client jq
+apt-get install -y curl jq
 
-# Ensure SSH directory and device key exist
-install -d -m 700 -o "${SSH_USER_ON_PI}" -g "${SSH_USER_ON_PI}" "${SSH_KEY_PATH}"
-
-if [[ ! -f ${PRIVKEY_PATH} ]]; then
-  ssh-keygen -t ed25519 -N "" -f "${PRIVKEY_PATH}"
+# Generate media-pi-agent configuration with server key
+echo "Generating media-pi-agent configuration..."
+if ! media-pi-agent setup; then
+  echo "Error: Failed to generate media-pi-agent configuration" >&2
+  exit 1
 fi
 
-if [[ -f ${PRIVKEY_PATH} ]]; then
-  chown "${SSH_USER_ON_PI}:${SSH_USER_ON_PI}" "${PRIVKEY_PATH}"
-  chmod 600 "${PRIVKEY_PATH}"
+# Extract server key from configuration
+if [[ ! -f "${AGENT_CONFIG_PATH}" ]]; then
+  echo "Error: Configuration file not found at ${AGENT_CONFIG_PATH}" >&2
+  exit 1
 fi
 
-if [[ -f ${PUBKEY_PATH} ]]; then
-  chown "${SSH_USER_ON_PI}:${SSH_USER_ON_PI}" "${PUBKEY_PATH}"
-  chmod 644 "${PUBKEY_PATH}"
+SERVER_KEY=$(grep '^server_key:' "${AGENT_CONFIG_PATH}" | sed 's/^server_key: *"\?\([^"]*\)"\?$/\1/')
+if [[ -z "${SERVER_KEY}" ]]; then
+  echo "Error: Could not extract server_key from configuration" >&2
+  exit 1
 fi
 
-# Prepare metadata
+echo "Generated server key: ${SERVER_KEY}"
+
+# Prepare device metadata
 HOSTNAME=$(hostname)
-# OS_NAME=$(grep -oP '(?<=^PRETTY_NAME=).+' /etc/os-release | tr -d '"')
-PUBKEY_CONTENT=$(cat "${PUBKEY_PATH}")
-
-# Enroll / register (idempotent upsert)
-echo "Enrolling device at ${CORE_API_BASE}/devices/register ..."
 DEVICE_IP=$(hostname -I | awk '{print $1}')
+AGENT_PORT=8080
+
+# Extract port from configuration if specified
+if grep -q '^listen_addr:' "${AGENT_CONFIG_PATH}"; then
+  LISTEN_ADDR=$(grep '^listen_addr:' "${AGENT_CONFIG_PATH}" | sed 's/^listen_addr: *"\?\([^"]*\)"\?$/\1/')
+  if [[ "${LISTEN_ADDR}" =~ :([0-9]+)$ ]]; then
+    AGENT_PORT="${BASH_REMATCH[1]}"
+  fi
+fi
+
+echo "Device metadata:"
+echo "  Hostname: ${HOSTNAME}"
+echo "  IP Address: ${DEVICE_IP}"
+echo "  Agent Port: ${AGENT_PORT}"
+
+# Register device with central server
+echo "Registering device at ${CORE_API_BASE}/devices/register ..."
 if ! RESP=$(
   curl -sS --fail-with-body -X POST "${CORE_API_BASE}/devices/register" \
     -H 'Content-Type: application/json' \
-    -d @<(jq -n --arg pk "$PUBKEY_CONTENT" \
+    -d @<(jq -n --arg sk "$SERVER_KEY" \
               --arg hn "$HOSTNAME" \
-              --arg su "$SSH_USER_ON_PI" \
               --arg ip "$DEVICE_IP" \
-              '{ publicKeyOpenSsh: $pk, name: $hn, ipAddress: $ip, sshUser: $su }')
+              --argjson port "$AGENT_PORT" \
+              '{ serverKey: $sk, name: $hn, ipAddress: $ip, port: $port }')
 ); then
   echo "Error: device registration request failed" >&2
   exit 1
 fi
-if [[ -z "${RESP}" ]]; then
-  echo "Error: empty response from device registration" >&2
+
+if [[ -n "${RESP}" ]]; then
+  echo "Registration response received:"
+  echo "${RESP}" | jq '.' 2>/dev/null || echo "${RESP}"
+  
+  # Extract device ID if present
+  DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" 2>/dev/null || true)
+  if [[ -n "${DEVICE_ID}" ]]; then
+    echo "Device registered with ID: ${DEVICE_ID}"
+  fi
+else
+  echo "Device registration completed (empty response)"
+fi
+
+# Enable and start the media-pi-agent service
+echo "Enabling and starting media-pi-agent service..."
+systemctl daemon-reload
+systemctl enable media-pi-agent.service
+systemctl start media-pi-agent.service
+
+# Verify service is running
+sleep 2
+if systemctl is-active --quiet media-pi-agent.service; then
+  echo "✓ Media Pi Agent service is running"
+  
+  # Test health endpoint
+  if curl -s "http://localhost:${AGENT_PORT}/health" >/dev/null 2>&1; then
+    echo "✓ REST API is responding on port ${AGENT_PORT}"
+  else
+    echo "⚠ Warning: REST API not responding on port ${AGENT_PORT}"
+  fi
+else
+  echo "✗ Error: Media Pi Agent service failed to start" >&2
+  systemctl status media-pi-agent.service >&2
   exit 1
 fi
 
-DEVICE_ID=$(jq -r '.id // empty' <<<"${RESP}" || true)
-if [[ -n "${DEVICE_ID}" ]]; then
-  echo "Device registered with ID ${DEVICE_ID}."
-else
-  echo "Device registration response did not include an ID."
-fi
-
-if ! SERVER_PUBLIC_SSH_KEY=$(jq -er '.serverPublicSshKey' <<<"${RESP}"); then
-  echo "Error: serverPublicSshKey is missing in the enrollment response" >&2
-  exit 1
-fi
-
-# Ensure authorized_keys exists with correct permissions
-if [[ ! -f "${AUTHORIZED_KEYS_PATH}" ]]; then
-  install -m 600 -o "${SSH_USER_ON_PI}" -g "${SSH_USER_ON_PI}" /dev/null "${AUTHORIZED_KEYS_PATH}"
-else
-  chown "${SSH_USER_ON_PI}:${SSH_USER_ON_PI}" "${AUTHORIZED_KEYS_PATH}"
-  chmod 600 "${AUTHORIZED_KEYS_PATH}"
-fi
-
-if grep -qxF "${SERVER_PUBLIC_SSH_KEY}" "${AUTHORIZED_KEYS_PATH}"; then
-  echo "Server public SSH key already present in ${AUTHORIZED_KEYS_PATH}"
-else
-  printf '%s\n' "${SERVER_PUBLIC_SSH_KEY}" >>"${AUTHORIZED_KEYS_PATH}"
-  echo "Appended server public SSH key to ${AUTHORIZED_KEYS_PATH}"
-fi
-
-echo "serverPublicSshKey: ${SERVER_PUBLIC_SSH_KEY}"
-
+echo ""
+echo "Setup completed successfully!"
+echo "Media Pi Agent REST service is running on ${DEVICE_IP}:${AGENT_PORT}"
+echo "Server key: ${SERVER_KEY}"
+echo ""
+echo "API endpoints available:"
+echo "  GET  http://${DEVICE_IP}:${AGENT_PORT}/health"
+echo "  GET  http://${DEVICE_IP}:${AGENT_PORT}/api/units"
+echo "  POST http://${DEVICE_IP}:${AGENT_PORT}/api/units/start"
+echo "  (Authentication required for /api/* endpoints)"
