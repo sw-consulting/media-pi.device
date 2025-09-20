@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# Set proper umask for file creation
+umask 022
+
 
 # Это нужно, чтобы корректно находить файлы скрипта (SCRIPT_DIR) в каталоге packaging, даже если mkdeb.sh
 # запускают из другой текущей рабочей директории.
@@ -45,6 +48,9 @@ mkdir -p "${ROOT}/etc/polkit-1/rules.d"
 mkdir -p "${ROOT}/etc/systemd/system"
 mkdir -p "${WORK}/DEBIAN"
 
+# Set proper permissions for DEBIAN directory
+chmod 755 "${WORK}/DEBIAN"
+
 # Копируем содержимое пакета (payload)
 # Используем install с правильными правами, чтобы гарантировать
 # ожидаемые режимы доступа для бинарника и конфигурации.
@@ -62,10 +68,6 @@ install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bi
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
 # Генерация правила polkit на этапе сборки.
-# Пояснение: polkit-правила выполняются в изолированной JS-среде и
-# не имеют доступа к файловой системе во время выполнения. Поэтому
-# мы формируем правило заранее на этапе сборки пакета, используя
-# список единиц (.service) из agent.yaml.
 
 # Собираем массив уникальных имён единиц из agent.yaml
 services=( )
@@ -141,6 +143,25 @@ Description: Media Pi Agent REST Service for Raspberry Pi
  the central management server.
 EOF
 
+# Preinst: выполняется перед установкой/обновлением пакета
+# Для upgrade - останавливаем службу (но не отключаем)
+cat > "${WORK}/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+
+# Only handle upgrades, not fresh installs
+if [ "$1" = "upgrade" ]; then
+    # Stop service if running (for upgrade)
+    if systemctl is-active --quiet media-pi-agent.service 2>/dev/null; then
+        echo "Stopping media-pi-agent service for upgrade..."
+        systemctl stop media-pi-agent.service || true
+    fi
+fi
+
+exit 0
+EOF
+chmod 0755 "${WORK}/DEBIAN/preinst"
+
 # Postinst: выполняется после установки пакета. 
 # Убеждаемся, что существует опциональная системная группа svc-ops.
 # Если группа уже есть, ошибки не будет
@@ -150,32 +171,63 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
-echo "Media Pi Agent installed successfully."
-echo ""
-echo "Next steps:"
-echo "1. Set CORE_API_BASE environment variable to point to your management server"
-echo "2. Run: sudo -E setup-media-pi.sh"
+# Reload systemd daemon to pick up new/updated service file
+systemctl daemon-reload || true
+
+# Handle service management based on install type
+if [ "$1" = "configure" ]; then
+    if [ -z "$2" ]; then
+        # Fresh installation
+        echo "Media Pi Agent installed successfully."
+        echo ""
+        echo "Next steps:"
+        echo "1. Set CORE_API_BASE environment variable to point to your management server"
+        echo "2. Run: sudo -E setup-media-pi.sh"
+        echo ""
+        echo "The service will be started automatically after running setup-media-pi.sh"
+    else
+        # Upgrade from previous version
+        echo "Media Pi Agent upgraded successfully."
+        
+        # If service was enabled before upgrade, restart it
+        if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
+            echo "Restarting media-pi-agent service..."
+            systemctl start media-pi-agent.service || {
+                echo "Failed to start service. You may need to run: sudo -E setup-media-pi.sh"
+            }
+        else
+            echo "Service not enabled. Run: sudo -E setup-media-pi.sh to enable and start the service."
+        fi
+    fi
+fi
+
 echo ""
 echo "For uninstallation, run: sudo dpkg -r media-pi-agent"
+echo "For upgrade just run: sudo dpkg -i media-pi-agent.deb, it will handle automatic service stop/start for upgrades"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"
 
 # Prerm: выполняется перед удалением пакета
-# Останавливает и отключает сервис если он был запущен
+# Останавливает и отключает сервис только при полном удалении (remove/purge)
+# При upgrade ничего не делаем (preinst уже остановил сервис)
 cat > "${WORK}/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 set -e
 
-# Stop and disable service if running
-if systemctl is-active --quiet media-pi-agent.service 2>/dev/null; then
-    echo "Stopping media-pi-agent service..."
-    systemctl stop media-pi-agent.service || true
-fi
+# Only stop/disable on removal or purge, not on upgrade
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    # Stop service if running
+    if systemctl is-active --quiet media-pi-agent.service 2>/dev/null; then
+        echo "Stopping media-pi-agent service..."
+        systemctl stop media-pi-agent.service || true
+    fi
 
-if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
-    echo "Disabling media-pi-agent service..."
-    systemctl disable media-pi-agent.service || true
+    # Disable service if enabled
+    if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
+        echo "Disabling media-pi-agent service..."
+        systemctl disable media-pi-agent.service || true
+    fi
 fi
 
 exit 0
@@ -184,5 +236,6 @@ chmod 0755 "${WORK}/DEBIAN/prerm"
 
 # Build .deb
 OUT="build/${PKG}_${VERSION}_${ARCH}.deb"
+
 dpkg-deb -Zxz --build "${WORK}" "${OUT}"
 echo "Built ${OUT}"
