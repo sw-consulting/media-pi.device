@@ -89,6 +89,26 @@ func TestHealthEndpoint(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("expected ok=true, got %v", resp.OK)
 	}
+
+	// Check that response data contains required fields
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data to be map[string]interface{}, got %T", resp.Data)
+	}
+
+	if status, exists := data["status"]; !exists || status != "healthy" {
+		t.Fatalf("expected status=healthy, got %v", status)
+	}
+
+	if version, exists := data["version"]; !exists {
+		t.Fatalf("expected version field to be present")
+	} else if versionStr, ok := version.(string); !ok || versionStr == "" {
+		t.Fatalf("expected version to be non-empty string, got %v", version)
+	}
+
+	if _, exists := data["time"]; !exists {
+		t.Fatalf("expected time field to be present")
+	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
