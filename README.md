@@ -32,7 +32,7 @@ export CORE_API_BASE="https://your-server.com"
 sudo -E setup-media-pi.sh
 ```
 
-**Важно:** Переменная `CORE_API_BASE` должна указывать на ваш сервер управления. Значение по умолчанию (`https://media-pi.sw.consulting:8086`) подойдет только для тестирования.
+**Важно:** Переменная `CORE_API_BASE` должна указывать на URL/port сервера управления (контейнер media-pi.core).
 
 ### Обновление
 
