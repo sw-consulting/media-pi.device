@@ -54,7 +54,7 @@ sudo apt install ./media-pi-agent-new.deb
 либо
 
 ```bash
-sudo dpkg -i /home/pi/Downloads/media-pi-agent-туц.deb
+sudo dpkg -i /home/pi/Downloads/media-pi-agent-new.deb
 sudo apt-get update
 sudo apt-get install -f -y
 ```
