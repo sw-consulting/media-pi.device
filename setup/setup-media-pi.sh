@@ -51,7 +51,7 @@ echo "Generated server key: ${SERVER_KEY}"
 
 # Prepare device metadata
 HOSTNAME=$(hostname)
-DEVICE_IP=$(hostname -I | awk '{print $1}')
+DEVICE_IP=$(ip -4 addr show wg0 2>/dev/null | grep -oP 'inet \K[\d.]+') || DEVICE_IP=$(hostname -I | awk '{print $1}')
 AGENT_PORT=8081
 
 # Extract port from configuration if specified

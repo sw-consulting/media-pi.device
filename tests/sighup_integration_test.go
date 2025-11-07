@@ -59,8 +59,6 @@ func TestSighupReloadIntegration(t *testing.T) {
 	tmp := t.TempDir()
 	bin := filepath.Join(tmp, "media-pi-agent-test")
 
-	// Build the agent binary from repository root. Use '.' to build the main package
-	// instead of './...' which would attempt to build multiple packages into a single file.
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Dir = filepath.Join("..")
 	if out, err := build.CombinedOutput(); err != nil {
