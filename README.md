@@ -172,7 +172,9 @@ sudo systemctl stop media-pi-agent
 sudo systemctl disable media-pi-agent
 
 # Удалить пакет и опционально конфигурацию
-# `apt remove --purge` удалит пакет и файлы конфигурации, находящиеся в `/etc/media-pi-agent/`. Если вы хотите сохранить конфигурацию (например, для отладки или повторной установки), не используйте `--purge` и просто выполните `sudo apt remove media-pi-agent`.
+# `apt remove --purge` удалит пакет и файлы конфигурации, находящиеся в `/etc/media-pi-agent/`. 
+# Если вы хотите сохранить конфигурацию (например, для отладки или повторной установки),
+# не используйте `--purge` и просто выполните `sudo apt remove media-pi-agent`.
 
 sudo apt remove --purge media-pi-agent
 

@@ -202,8 +202,8 @@ if [ "$1" = "configure" ]; then
 fi
 
 echo ""
-echo "For uninstallation, run: sudo dpkg -r media-pi-agent"
-echo "For upgrade just run: sudo dpkg -i media-pi-agent.deb, it will handle automatic service stop/start for upgrades"
+echo "For uninstallation, run: sudo apt remove media-pi-agent"
+echo "For upgrade run: sudo apt install ./media-pi-agent.deb, it will handle automatic service stop/start for upgrades"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"
