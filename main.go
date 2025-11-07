@@ -68,6 +68,22 @@ func main() {
 	mux.HandleFunc("/api/units/enable", agent.AuthMiddleware(agent.HandleUnitAction("enable")))
 	mux.HandleFunc("/api/units/disable", agent.AuthMiddleware(agent.HandleUnitAction("disable")))
 
+	// Menu endpoints
+	mux.HandleFunc("/api/menu", agent.AuthMiddleware(agent.HandleMenuList))
+	mux.HandleFunc("/api/menu/playback/stop", agent.AuthMiddleware(agent.HandlePlaybackStop))
+	mux.HandleFunc("/api/menu/playback/start", agent.AuthMiddleware(agent.HandlePlaybackStart))
+	mux.HandleFunc("/api/menu/storage/check", agent.AuthMiddleware(agent.HandleStorageCheck))
+	mux.HandleFunc("/api/menu/playlist/upload", agent.AuthMiddleware(agent.HandlePlaylistUpload))
+	mux.HandleFunc("/api/menu/playlist/select", agent.AuthMiddleware(agent.HandlePlaylistSelect))
+	mux.HandleFunc("/api/menu/schedule/rest-time", agent.AuthMiddleware(agent.HandleSetRestTime))
+	mux.HandleFunc("/api/menu/schedule/playlist-update", agent.AuthMiddleware(agent.HandlePlaylistUpdateTime))
+	mux.HandleFunc("/api/menu/schedule/video-update", agent.AuthMiddleware(agent.HandleVideoUpdateTime))
+	mux.HandleFunc("/api/menu/audio/hdmi", agent.AuthMiddleware(agent.HandleAudioHDMI))
+	mux.HandleFunc("/api/menu/audio/jack", agent.AuthMiddleware(agent.HandleAudioJack))
+	mux.HandleFunc("/api/menu/system/reload", agent.AuthMiddleware(agent.HandleSystemReload))
+	mux.HandleFunc("/api/menu/system/reboot", agent.AuthMiddleware(agent.HandleSystemReboot))
+	mux.HandleFunc("/api/menu/system/shutdown", agent.AuthMiddleware(agent.HandleSystemShutdown))
+
 	listenAddr := cfg.ListenAddr
 	if listenAddr == "" {
 		listenAddr = agent.DefaultListenAddr

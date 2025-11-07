@@ -81,6 +81,8 @@ sudo systemctl status media-pi-agent
 
 ## API Endpoints
 
+### System Endpoints
+
 - `GET /health` — проверка состояния (без авторизации)
 - `GET /api/units` — список всех разрешённых юнитов
 - `GET /api/units/status?unit=<name>` — статус юнита
@@ -89,6 +91,23 @@ sudo systemctl status media-pi-agent
 - `POST /api/units/restart` — перезапуск юнита
 - `POST /api/units/enable` — включение юнита
 - `POST /api/units/disable` — отключение юнита
+
+### Menu Endpoints
+
+- `GET /api/menu` — список доступных действий меню
+- `POST /api/menu/playback/stop` — остановить воспроизведение
+- `POST /api/menu/playback/start` — запустить воспроизведение
+- `GET /api/menu/storage/check` — проверка яндекс диска
+- `POST /api/menu/playlist/upload` — загрузка плейлиста
+- `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
+- `PUT /api/menu/schedule/rest-time` — задать время отдыха (crontab)
+- `PUT /api/menu/schedule/playlist-update` — время обновления плейлиста
+- `PUT /api/menu/schedule/video-update` — время обновления видео
+- `POST /api/menu/audio/hdmi` — настройка HDMI аудио
+- `POST /api/menu/audio/jack` — настройка 3.5mm Jack аудио
+- `POST /api/menu/system/reload` — применить изменения (daemon-reload)
+- `POST /api/menu/system/reboot` — перезагрузка системы
+- `POST /api/menu/system/shutdown` — выключение системы
 
 ## Авторизация
 
