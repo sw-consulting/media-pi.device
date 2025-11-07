@@ -51,7 +51,7 @@ echo "Generated server key: ${SERVER_KEY}"
 
 # Prepare device metadata
 HOSTNAME=$(hostname)
-DEVICE_IP=$(hostname -I | awk '{print $1}')
+DEVICE_IP=$(ip -4 addr show wg0 2>/dev/null | grep -oP 'inet \K[\d.]+') || DEVICE_IP=$(hostname -I | awk '{print $1}')
 AGENT_PORT=8081
 
 # Extract port from configuration if specified
@@ -158,3 +158,17 @@ echo "  GET  http://${DEVICE_IP}:${AGENT_PORT}/health"
 echo "  GET  http://${DEVICE_IP}:${AGENT_PORT}/api/units"
 echo "  POST http://${DEVICE_IP}:${AGENT_PORT}/api/units/start"
 echo "  (Authentication required for /api/* endpoints)"
+
+# If configuration was updated by this script, try to ask the running agent to
+# reload without a full restart. Prefer `systemctl reload` (ExecReload -> HUP)
+# which will signal the main PID. If reload is not supported or fails, fall
+# back to restart which is safe.
+echo "Attempting to reload media-pi-agent to apply configuration..."
+if systemctl is-active --quiet media-pi-agent.service; then
+  if systemctl reload media-pi-agent.service; then
+    echo "\u2713 media-pi-agent reloaded via systemctl reload"
+  else
+    echo "\u26a0 reload failed; restarting service"
+    systemctl restart media-pi-agent.service
+  fi
+fi

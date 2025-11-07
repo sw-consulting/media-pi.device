@@ -1,18 +1,28 @@
 // Copyright (c) 2025 sw.consulting
 // This file is a part of Media Pi device agent
 
+// Package main implements the media-pi-agent CLI & HTTP service. The
+// binary supports a `setup` command which writes a configuration file and
+// exits, and otherwise runs an HTTP API that controls allowed systemd
+// units. Configuration is read from `/etc/media-pi-agent/agent.yaml` by
+// default; tests can override that path with the `MEDIA_PI_AGENT_CONFIG`
+// environment variable.
 package main
 
 import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
 	"github.com/sw-consulting/media-pi.device/internal/agent"
 )
 
+// server timeouts protect the HTTP server from slowloris-style attacks and
+// hung connections. Values are conservative for embedded devices.
 const (
-	// Default server timeouts to protect against slowloris and hung connections
 	serverReadTimeout  = 15 * time.Second
 	serverWriteTimeout = 15 * time.Second
 	serverIdleTimeout  = 60 * time.Second
@@ -32,13 +42,24 @@ func main() {
 		return
 	}
 
-	cfg, err := agent.LoadConfigFrom("/etc/media-pi-agent/agent.yaml")
+	// Allow tests and packaging to override the config path via environment
+	// variable so integration tests can run without needing /etc access.
+	configPath := os.Getenv("MEDIA_PI_AGENT_CONFIG")
+	if configPath == "" {
+		configPath = "/etc/media-pi-agent/agent.yaml"
+	}
+
+	cfg, err := agent.LoadConfigFrom(configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	// Make the loaded config path available to the agent package for reloads
+	agent.ConfigPath = configPath
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", agent.HandleHealth)
+	// internal authenticated reload endpoint - used by setup scripts or ExecReload
+	mux.HandleFunc("/internal/reload", agent.AuthMiddleware(agent.HandleReload))
 	mux.HandleFunc("/api/units", agent.AuthMiddleware(agent.HandleListUnits))
 	mux.HandleFunc("/api/units/status", agent.AuthMiddleware(agent.HandleUnitStatus))
 	mux.HandleFunc("/api/units/start", agent.AuthMiddleware(agent.HandleUnitAction("start")))
@@ -60,6 +81,20 @@ func main() {
 		WriteTimeout: serverWriteTimeout,
 		IdleTimeout:  serverIdleTimeout,
 	}
+
+	// Handle SIGHUP to reload configuration without restarting the process.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGHUP)
+	go func() {
+		for range sigs {
+			log.Printf("received SIGHUP, reloading configuration")
+			if err := agent.ReloadConfig(); err != nil {
+				log.Printf("reload failed: %v", err)
+			} else {
+				log.Printf("configuration reloaded")
+			}
+		}
+	}()
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
