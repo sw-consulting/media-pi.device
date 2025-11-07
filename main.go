@@ -7,8 +7,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
+	"github.com/sw-consulting/media-pi.device/internal/agent"
+)
 
-	"github.com/swconsulting/media-pi.device/internal/agent"
+const (
+	// Default server timeouts to protect against slowloris and hung connections
+	serverReadTimeout  = 15 * time.Second
+	serverWriteTimeout = 15 * time.Second
+	serverIdleTimeout  = 60 * time.Second
 )
 
 func main() {
@@ -47,8 +54,11 @@ func main() {
 	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
 
 	server := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
+		Addr:         listenAddr,
+		Handler:      mux,
+		ReadTimeout:  serverReadTimeout,
+		WriteTimeout: serverWriteTimeout,
+		IdleTimeout:  serverIdleTimeout,
 	}
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)

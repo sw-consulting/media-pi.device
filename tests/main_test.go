@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yourusername/media-pi.device/internal/agent"
+	"github.com/sw-consulting/media-pi.device/internal/agent"
 	"gopkg.in/yaml.v3"
 )
 
