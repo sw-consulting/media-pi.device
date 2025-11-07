@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -66,6 +67,34 @@ func GetMenuActions() []MenuAction {
 			Description: "Upload playlist from remote source",
 			Method:      "POST",
 			Path:        "/api/menu/playlist/upload",
+		},
+		{
+			ID:          "rest-time",
+			Name:        "Задать время отдыха",
+			Description: "Set rest time interval with crontab",
+			Method:      "PUT",
+			Path:        "/api/menu/schedule/rest-time",
+		},
+		{
+			ID:          "playlist-select",
+			Name:        "Выбор плейлиста",
+			Description: "Update playlist upload service configuration",
+			Method:      "PUT",
+			Path:        "/api/menu/playlist/select",
+		},
+		{
+			ID:          "playlist-update-time",
+			Name:        "Время обновления плейлиста",
+			Description: "Set playlist update schedule",
+			Method:      "PUT",
+			Path:        "/api/menu/schedule/playlist-update",
+		},
+		{
+			ID:          "video-update-time",
+			Name:        "Время обновления видео",
+			Description: "Set video update schedule",
+			Method:      "PUT",
+			Path:        "/api/menu/schedule/video-update",
 		},
 		{
 			ID:          "audio-hdmi",
@@ -467,4 +496,225 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 		cmd := exec.Command("sudo", "shutdown", "now")
 		_ = cmd.Run()
 	}()
+}
+
+// RestTimeRequest represents the request to set rest time.
+type RestTimeRequest struct {
+	StopTime  string `json:"stop_time"`  // Format: "HH:MM"
+	StartTime string `json:"start_time"` // Format: "HH:MM"
+}
+
+// FileContentRequest represents a request to update a file.
+type FileContentRequest struct {
+	Content string `json:"content"`
+}
+
+// TimeScheduleRequest represents a request to update a time schedule.
+type TimeScheduleRequest struct {
+	Time string `json:"time"` // Format: "HH:MM"
+}
+
+// HandleSetRestTime sets the rest time interval using crontab.
+func HandleSetRestTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req RestTimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	// Validate time format (HH:MM)
+	if !isValidTimeFormat(req.StopTime) || !isValidTimeFormat(req.StartTime) {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный формат времени. Используйте HH:MM",
+		})
+		return
+	}
+
+	// Parse times
+	stopParts := strings.Split(req.StopTime, ":")
+	startParts := strings.Split(req.StartTime, ":")
+
+	// Create crontab entries
+	crontabContent := fmt.Sprintf("%s %s * * * sudo systemctl stop play.video.service\n%s %s * * * sudo systemctl start play.video.service\n",
+		stopParts[1], stopParts[0], startParts[1], startParts[0])
+
+	// Write to temporary file
+	tmpFile, err := os.CreateTemp("", "crontab-*")
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось создать временный файл: %v", err),
+		})
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(crontabContent); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать crontab: %v", err),
+		})
+		return
+	}
+	tmpFile.Close()
+
+	// Install crontab
+	cmd := exec.Command("crontab", tmpFile.Name())
+	if output, err := cmd.CombinedOutput(); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось установить crontab: %v, %s", err, string(output)),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "rest-time",
+			Result:  "success",
+			Message: "Время отдыха задано",
+		},
+	})
+}
+
+// HandlePlaylistSelect updates the playlist upload service configuration.
+func HandlePlaylistSelect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req FileContentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	filePath := "/etc/systemd/system/playlist.upload.service"
+	if err := os.WriteFile(filePath, []byte(req.Content), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-select",
+			Result:  "success",
+			Message: "Выбор плейлиста",
+		},
+	})
+}
+
+// HandlePlaylistUpdateTime updates the playlist update timer configuration.
+func HandlePlaylistUpdateTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req FileContentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	filePath := "/etc/systemd/system/playlist.upload.timer"
+	if err := os.WriteFile(filePath, []byte(req.Content), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-update-time",
+			Result:  "success",
+			Message: "Время обновления плейлиста",
+		},
+	})
+}
+
+// HandleVideoUpdateTime updates the video update timer configuration.
+func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req FileContentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	filePath := "/etc/systemd/system/video.upload.timer"
+	if err := os.WriteFile(filePath, []byte(req.Content), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "video-update-time",
+			Result:  "success",
+			Message: "Время обновления видео",
+		},
+	})
+}
+
+// isValidTimeFormat checks if a string is in HH:MM format.
+func isValidTimeFormat(timeStr string) bool {
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	
+	var hour, minute int
+	if _, err := fmt.Sscanf(timeStr, "%d:%d", &hour, &minute); err != nil {
+		return false
+	}
+	
+	return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
 }

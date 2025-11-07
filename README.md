@@ -99,6 +99,10 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/playback/start` — запустить воспроизведение
 - `GET /api/menu/storage/check` — проверка яндекс диска
 - `POST /api/menu/playlist/upload` — загрузка плейлиста
+- `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
+- `PUT /api/menu/schedule/rest-time` — задать время отдыха (crontab)
+- `PUT /api/menu/schedule/playlist-update` — время обновления плейлиста
+- `PUT /api/menu/schedule/video-update` — время обновления видео
 - `POST /api/menu/audio/hdmi` — настройка HDMI аудио
 - `POST /api/menu/audio/jack` — настройка 3.5mm Jack аудио
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)

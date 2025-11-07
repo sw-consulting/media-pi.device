@@ -92,6 +92,10 @@ func TestGetMenuActions(t *testing.T) {
 		"playback-start",
 		"storage-check",
 		"playlist-upload",
+		"rest-time",
+		"playlist-select",
+		"playlist-update-time",
+		"video-update-time",
 		"audio-hdmi",
 		"audio-jack",
 		"system-reload",
@@ -251,5 +255,83 @@ func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleSetRestTimeMethodNotAllowed(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/rest-time", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandleSetRestTime(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandlePlaylistSelectMethodNotAllowed(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/select", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandlePlaylistSelect(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandlePlaylistUpdateTimeMethodNotAllowed(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/playlist-update", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandlePlaylistUpdateTime(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleVideoUpdateTimeMethodNotAllowed(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/video-update", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandleVideoUpdateTime(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestGetMenuActionsIncludesNewActions(t *testing.T) {
+	actions := agent.GetMenuActions()
+
+	expectedIDs := []string{
+		"rest-time",
+		"playlist-select",
+		"playlist-update-time",
+		"video-update-time",
+	}
+
+	foundIDs := make(map[string]bool)
+	for _, action := range actions {
+		foundIDs[action.ID] = true
+	}
+
+	for _, expectedID := range expectedIDs {
+		if !foundIDs[expectedID] {
+			t.Errorf("expected action ID %q not found in menu actions", expectedID)
+		}
 	}
 }
