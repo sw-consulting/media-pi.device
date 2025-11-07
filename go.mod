@@ -1,4 +1,4 @@
-module github.com/yourusername/media-pi.device
+module github.com/sw-consulting/media-pi.device
 
 go 1.25.1
 
