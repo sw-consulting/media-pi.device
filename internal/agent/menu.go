@@ -417,14 +417,16 @@ func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
 	// encoding gives us more explicit control over the response lifecycle.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(APIResponse{
+	if err := json.NewEncoder(w).Encode(APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "system-reboot",
 			Result:  "success",
 			Message: "Перезагрузка...",
 		},
-	})
+	}); err != nil {
+		fmt.Printf("Failed to encode JSON response: %v\n", err)
+	}
 
 	// Execute reboot in a goroutine to allow response to be sent
 	go func() {
@@ -449,14 +451,16 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 	// encoding gives us more explicit control over the response lifecycle.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(APIResponse{
+	if err := json.NewEncoder(w).Encode(APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "system-shutdown",
 			Result:  "success",
 			Message: "Выключение...",
 		},
-	})
+	}); err != nil {
+		fmt.Printf("Failed to encode JSON response: %v\n", err)
+	}
 
 	// Execute shutdown in a goroutine to allow response to be sent
 	go func() {
