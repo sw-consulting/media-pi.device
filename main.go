@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/yourusername/media-pi.device/internal/agent"
+	"github.com/swconsulting/media-pi.device/internal/agent"
 )
 
 func main() {
