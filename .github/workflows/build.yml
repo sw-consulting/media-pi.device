@@ -59,7 +59,7 @@ jobs:
           GOARCH=${{ matrix.target.goarch }} \
           GOARM=${{ matrix.target.goarm }} \
           go build -trimpath -buildvcs=false \
-            -ldflags "-s -w -extldflags '-static' -X github.com/yourusername/media-pi.device/internal/agent.Version=${{ steps.version.outputs.version }}" \
+            -ldflags "-s -w -extldflags '-static' -X github.com/sw-consulting/media-pi.device/internal/agent.Version=${{ steps.version.outputs.version }}" \
             -o dist/${{ matrix.target.name }}/media-pi-agent .
 
       - name: Show file info
