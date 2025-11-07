@@ -4,11 +4,15 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/coreos/go-systemd/v22/dbus"
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -129,8 +133,21 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sudo", "systemctl", "stop", "play.video.service")
-	output, err := cmd.CombinedOutput()
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
+		})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StopUnitContext(ctx, "play.video.service", "replace", ch)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -139,19 +156,16 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result := <-ch
+
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "playback-stop",
-			Result:  "success",
+			Result:  result,
 			Message: "Воспроизведение остановлено",
 		},
 	})
-
-	if len(output) > 0 {
-		// Log output for debugging
-		fmt.Printf("playback-stop output: %s\n", string(output))
-	}
 }
 
 // HandlePlaybackStart starts the video playback service.
@@ -164,8 +178,21 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sudo", "systemctl", "start", "play.video.service")
-	output, err := cmd.CombinedOutput()
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
+		})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StartUnitContext(ctx, "play.video.service", "replace", ch)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -174,18 +201,16 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result := <-ch
+
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "playback-start",
-			Result:  "success",
+			Result:  result,
 			Message: "Воспроизведение запущено",
 		},
 	})
-
-	if len(output) > 0 {
-		fmt.Printf("playback-start output: %s\n", string(output))
-	}
 }
 
 // HandleStorageCheck checks the Yandex disk mount status.
@@ -229,8 +254,21 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sudo", "systemctl", "start", "playlist.upload.service")
-	output, err := cmd.CombinedOutput()
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
+		})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StartUnitContext(ctx, "playlist.upload.service", "replace", ch)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -239,18 +277,16 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result := <-ch
+
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "playlist-upload",
-			Result:  "success",
+			Result:  result,
 			Message: "Загрузка плейлиста",
 		},
 	})
-
-	if len(output) > 0 {
-		fmt.Printf("playlist-upload output: %s\n", string(output))
-	}
 }
 
 // HandleAudioHDMI configures HDMI audio output.
@@ -333,8 +369,20 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.Command("sudo", "systemctl", "daemon-reload")
-	output, err := cmd.CombinedOutput()
+	conn, err := dbus.NewWithContext(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
+		})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = conn.ReloadContext(ctx)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -351,10 +399,6 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 			Message: "Изменения применены",
 		},
 	})
-
-	if len(output) > 0 {
-		fmt.Printf("system-reload output: %s\n", string(output))
-	}
 }
 
 // HandleSystemReboot reboots the system.
