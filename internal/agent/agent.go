@@ -3,7 +3,7 @@
 
 package agent
 
-// This package contains the core agent functionality extracted from main
+// Package agent contains the core agent functionality extracted from main
 // so tests can live in a separate directory and import a stable API.
 
 import (
@@ -26,18 +26,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config represents the agent configuration file structure. It is loaded
+// from YAML and contains the list of allowed systemd units, the server
+// authentication key and the listen address for the HTTP API.
 type Config struct {
 	AllowedUnits []string `yaml:"allowed_units"`
 	ServerKey    string   `yaml:"server_key,omitempty"`
 	ListenAddr   string   `yaml:"listen_addr,omitempty"`
 }
 
+// APIResponse is the standard envelope used by HTTP handlers to return
+// success or failure along with optional data.
 type APIResponse struct {
 	OK     bool        `json:"ok"`
 	ErrMsg string      `json:"errmsg,omitempty"`
 	Data   interface{} `json:"data,omitempty"`
 }
 
+// UnitInfo contains a brief set of properties about a systemd unit used in
+// list and status responses. The fields mirror systemd properties and are
+// encoded as JSON.
 type UnitInfo struct {
 	Unit   string      `json:"unit"`
 	Active interface{} `json:"active,omitempty"`
@@ -45,25 +53,43 @@ type UnitInfo struct {
 	Error  string      `json:"error,omitempty"`
 }
 
+// UnitActionRequest is the JSON body used for unit control actions such as
+// start/stop/restart.
 type UnitActionRequest struct {
 	Unit string `json:"unit"`
 }
 
+// UnitActionResponse is returned after performing a unit action.
 type UnitActionResponse struct {
 	Unit   string `json:"unit"`
 	Result string `json:"result,omitempty"`
 }
 
 var (
+	// AllowedUnits contains the set of unit names the agent is permitted
+	// to operate on. It is populated by LoadConfigFrom.
 	AllowedUnits map[string]struct{}
-	ServerKey    string
+
+	// ServerKey is the Bearer token required to access authenticated API
+	// endpoints. It is loaded from the configuration and may be rotated
+	// by updating the config and reloading.
+	ServerKey string
+
+	// ConfigPath holds the path to the active configuration file. It must
+	// be set by the caller (main) before calling ReloadConfig.
+	ConfigPath string
 )
 
+// DefaultListenAddr is used when the configuration does not specify a
+// listen address for the HTTP API.
 const DefaultListenAddr = "0.0.0.0:8081"
 
 // Version can be set at build time with -ldflags
 var Version = "unknown"
 
+// GetVersion returns the version string for the running binary. When the
+// Version variable is not set at build time it will try to derive a value
+// from git tags; otherwise it returns "unknown".
 func GetVersion() string {
 	if Version != "unknown" {
 		return Version
@@ -80,6 +106,7 @@ func GetVersion() string {
 	return "unknown"
 }
 
+// DefaultConfig returns a reasonable default Config.
 func DefaultConfig() Config {
 	return Config{
 		AllowedUnits: []string{},
@@ -87,6 +114,9 @@ func DefaultConfig() Config {
 	}
 }
 
+// LoadConfigFrom loads configuration from path and updates package-level
+// state (AllowedUnits, ServerKey). It returns the parsed Config to the
+// caller for further use.
 func LoadConfigFrom(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -97,19 +127,58 @@ func LoadConfigFrom(path string) (*Config, error) {
 		return nil, err
 	}
 
-	AllowedUnits = make(map[string]struct{}, len(c.AllowedUnits))
+	newAllowedUnits := make(map[string]struct{}, len(c.AllowedUnits))
 	for _, u := range c.AllowedUnits {
-		AllowedUnits[u] = struct{}{}
+		newAllowedUnits[u] = struct{}{}
 	}
 
-	ServerKey = c.ServerKey
-	if ServerKey == "" {
+	if c.ServerKey == "" {
 		return nil, fmt.Errorf("server_key is required in configuration")
 	}
+
+	AllowedUnits = newAllowedUnits
+	ServerKey = c.ServerKey
 
 	return &c, nil
 }
 
+// ReloadConfig reloads configuration from the previously set ConfigPath.
+// Callers must set ConfigPath before invoking ReloadConfig (for example in
+// main after the initial load). ReloadConfig updates package globals
+// (AllowedUnits, ServerKey) by reusing LoadConfigFrom.
+func ReloadConfig() error {
+	if ConfigPath == "" {
+		return fmt.Errorf("config path is not set")
+	}
+	cfg, err := LoadConfigFrom(ConfigPath)
+	if err != nil {
+		return err
+	}
+	// Optionally we could do something with cfg here in the future.
+	_ = cfg
+	return nil
+}
+
+// HandleReload is an authenticated HTTP handler that triggers a
+// configuration reload. It accepts POST requests and returns 204 on
+// success.
+func HandleReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "method not allowed"})
+		return
+	}
+
+	if err := ReloadConfig(); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	// No content - reload successful
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GenerateServerKey creates a random 32-byte server key encoded as
+// hexadecimal. It is suitable for storing in the config file.
 func GenerateServerKey() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -118,6 +187,9 @@ func GenerateServerKey() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
+// SetupConfig creates or updates the configuration file at configPath.
+// It generates a new ServerKey and writes the file with secure
+// permissions.
 func SetupConfig(configPath string) error {
 	config := DefaultConfig()
 	existing := false
@@ -171,6 +243,8 @@ func SetupConfig(configPath string) error {
 	return nil
 }
 
+// IsAllowed returns nil when the provided unit is present in AllowedUnits
+// and an error otherwise.
 func IsAllowed(unit string) error {
 	if _, ok := AllowedUnits[unit]; !ok {
 		return fmt.Errorf("управление сервисом %q запрещено", unit)
@@ -178,6 +252,8 @@ func IsAllowed(unit string) error {
 	return nil
 }
 
+// AuthMiddleware enforces Bearer token authentication using ServerKey and
+// invokes the next handler when authentication succeeds.
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -201,6 +277,8 @@ func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// JSONResponse writes an APIResponse as JSON with the provided HTTP status
+// code and sets the Content-Type header.
 func JSONResponse(w http.ResponseWriter, status int, response APIResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -209,6 +287,8 @@ func JSONResponse(w http.ResponseWriter, status int, response APIResponse) {
 	}
 }
 
+// HandleListUnits returns state for all allowed units as JSON. It requires
+// a GET request and authentication.
 func HandleListUnits(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
@@ -251,6 +331,8 @@ func HandleListUnits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleUnitStatus returns state for a single allowed unit. It requires a
+// GET request and the "unit" query parameter.
 func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
@@ -309,6 +391,9 @@ func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleUnitAction returns an HTTP handler which performs the specified
+// action (start/stop/restart/enable/disable) on the unit provided in the
+// request body.
 func HandleUnitAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -415,6 +500,8 @@ func HandleUnitAction(action string) http.HandlerFunc {
 	}
 }
 
+// HandleHealth provides a simple healthcheck endpoint with version and
+// timestamp information.
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{

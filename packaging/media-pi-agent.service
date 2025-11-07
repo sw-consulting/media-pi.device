@@ -14,6 +14,16 @@ RestartSec=5
 TimeoutStartSec=30
 TimeoutStopSec=30
 
+# Allow systemctl reload to signal the main process to reload configuration.
+# This uses HUP which the agent handles to reload `/etc/media-pi-agent/agent.yaml`.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Optionally, admins can provide the server key to ExecReload calls via
+# an EnvironmentFile drop-in. Avoid placing secrets directly in the unit file.
+# Example drop-in: /etc/systemd/system/media-pi-agent.service.d/override.conf
+# [Service]
+# EnvironmentFile=/etc/media-pi-agent/env
+
 # Security settings
 NoNewPrivileges=true
 ProtectSystem=strict
