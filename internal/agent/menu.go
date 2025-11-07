@@ -253,12 +253,6 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// AudioConfig represents the audio configuration request.
-type AudioConfig struct {
-	Card int    `json:"card"`
-	Type string `json:"type"` // "hdmi" or "jack"
-}
-
 // HandleAudioHDMI configures HDMI audio output.
 func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -373,7 +367,10 @@ func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send response before executing reboot
+	// Note: We manually encode JSON here instead of using JSONResponse because
+	// we need to ensure the response is fully sent to the client before the
+	// reboot command executes. Using JSONResponse would work, but manually
+	// encoding gives us more explicit control over the response lifecycle.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(APIResponse{
@@ -402,7 +399,10 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send response before executing shutdown
+	// Note: We manually encode JSON here instead of using JSONResponse because
+	// we need to ensure the response is fully sent to the client before the
+	// shutdown command executes. Using JSONResponse would work, but manually
+	// encoding gives us more explicit control over the response lifecycle.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(APIResponse{
