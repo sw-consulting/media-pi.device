@@ -96,7 +96,6 @@ func TestGetMenuActions(t *testing.T) {
 		"playback-start",
 		"storage-check",
 		"playlist-upload",
-		"rest-time",
 		"playlist-select",
 		"schedule-get",
 		"schedule-update",
@@ -259,138 +258,6 @@ func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandleSetRestTimeMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/rest-time", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	agent.HandleSetRestTime(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandleSetRestTimeUpdatesCrontabWithPairs(t *testing.T) {
-	originalRead := agent.CrontabReadFunc
-	originalWrite := agent.CrontabWriteFunc
-	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalRead
-		agent.CrontabWriteFunc = originalWrite
-	})
-
-	existing := strings.Join([]string{
-		"5 4 * * * /usr/bin/echo 'hello'",
-		"# MEDIA_PI_REST STOP",
-		"15 20 * * * sudo systemctl stop play.video.service",
-		"# MEDIA_PI_REST START",
-		"45 21 * * * sudo systemctl start play.video.service",
-	}, "\n") + "\n"
-
-	agent.CrontabReadFunc = func() (string, error) {
-		return existing, nil
-	}
-
-	var written string
-	agent.CrontabWriteFunc = func(content string) error {
-		written = content
-		return nil
-	}
-
-	body := `{"times":[{"start":"09:00","stop":"18:30"},{"start":"22:15","stop":"23:45"}]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/rest-time", strings.NewReader(body))
-	w := httptest.NewRecorder()
-
-	agent.HandleSetRestTime(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	if written == "" {
-		t.Fatalf("expected crontab to be written")
-	}
-
-	if !strings.Contains(written, "5 4 * * * /usr/bin/echo 'hello'") {
-		t.Fatalf("expected existing entry to remain, got %q", written)
-	}
-
-	if strings.Contains(written, "15 20 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected old rest stop entry to be removed")
-	}
-
-	if strings.Count(written, "# MEDIA_PI_REST STOP") != 2 {
-		t.Fatalf("expected two rest stop markers, got %q", written)
-	}
-
-	if !strings.Contains(written, "30 18 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected new stop entry for 18:30, got %q", written)
-	}
-
-	if !strings.Contains(written, "00 09 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected new start entry for 09:00, got %q", written)
-	}
-
-	if !strings.Contains(written, "45 23 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected second stop entry for 23:45, got %q", written)
-	}
-
-	if !strings.Contains(written, "15 22 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected second start entry for 22:15, got %q", written)
-	}
-}
-
-func TestHandleSetRestTimeClearsIntervals(t *testing.T) {
-	originalRead := agent.CrontabReadFunc
-	originalWrite := agent.CrontabWriteFunc
-	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalRead
-		agent.CrontabWriteFunc = originalWrite
-	})
-
-	existing := strings.Join([]string{
-		"5 4 * * * /usr/bin/echo 'hello'",
-		"# MEDIA_PI_REST STOP",
-		"15 20 * * * sudo systemctl stop play.video.service",
-		"# MEDIA_PI_REST START",
-		"45 21 * * * sudo systemctl start play.video.service",
-	}, "\n") + "\n"
-
-	agent.CrontabReadFunc = func() (string, error) {
-		return existing, nil
-	}
-
-	var written string
-	agent.CrontabWriteFunc = func(content string) error {
-		written = content
-		return nil
-	}
-
-	body := `{"times":[]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/rest-time", strings.NewReader(body))
-	w := httptest.NewRecorder()
-
-	agent.HandleSetRestTime(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	if written == "" {
-		t.Fatalf("expected crontab to be written")
-	}
-
-	if strings.Contains(written, "# MEDIA_PI_REST STOP") || strings.Contains(written, "# MEDIA_PI_REST START") {
-		t.Fatalf("expected rest markers to be removed, got %q", written)
-	}
-
-	if !strings.Contains(written, "5 4 * * * /usr/bin/echo 'hello'") {
-		t.Fatalf("expected other entries to remain, got %q", written)
 	}
 }
 
@@ -634,7 +501,7 @@ func TestHandleScheduleUpdateValidation(t *testing.T) {
 	}
 }
 
-func TestHandleScheduleUpdateWritesTimers(t *testing.T) {
+func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 	agent.ServerKey = "test-key"
 
 	tmp := t.TempDir()
@@ -650,7 +517,36 @@ func TestHandleScheduleUpdateWritesTimers(t *testing.T) {
 		agent.VideoTimerPath = originalVideo
 	})
 
-	body := `{"playlist":["6:05","16:28"],"video":["22:22"]}`
+	originalRead := agent.CrontabReadFunc
+	originalWrite := agent.CrontabWriteFunc
+	t.Cleanup(func() {
+		agent.CrontabReadFunc = originalRead
+		agent.CrontabWriteFunc = originalWrite
+	})
+
+	existing := strings.Join([]string{
+		"5 4 * * * /usr/bin/echo 'hello'",
+		"# MEDIA_PI_REST STOP",
+		"15 20 * * * sudo systemctl stop play.video.service",
+		"# MEDIA_PI_REST START",
+		"45 21 * * * sudo systemctl start play.video.service",
+	}, "\n") + "\n"
+
+	agent.CrontabReadFunc = func() (string, error) {
+		return existing, nil
+	}
+
+	var (
+		writeCalled bool
+		writtenCron string
+	)
+	agent.CrontabWriteFunc = func(content string) error {
+		writeCalled = true
+		writtenCron = content
+		return nil
+	}
+
+	body := `{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"13:00","stop":"12:00"},{"start":"07:00","stop":"23:45"}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -678,13 +574,153 @@ func TestHandleScheduleUpdateWritesTimers(t *testing.T) {
 	if !strings.Contains(string(videoData), "OnCalendar=--* 22:22:00") {
 		t.Fatalf("expected video time in file, got %s", string(videoData))
 	}
+
+	if !writeCalled {
+		t.Fatalf("expected crontab to be written")
+	}
+
+	if strings.Contains(writtenCron, "15 20 * * * sudo systemctl stop play.video.service") {
+		t.Fatalf("expected old rest stop entry to be removed, got %q", writtenCron)
+	}
+
+	if strings.Count(writtenCron, "# MEDIA_PI_REST STOP") != 2 {
+		t.Fatalf("expected two rest stop markers, got %q", writtenCron)
+	}
+
+	if !strings.Contains(writtenCron, "00 12 * * * sudo systemctl stop play.video.service") {
+		t.Fatalf("expected stop entry for 12:00, got %q", writtenCron)
+	}
+
+	if !strings.Contains(writtenCron, "00 13 * * * sudo systemctl start play.video.service") {
+		t.Fatalf("expected start entry for 13:00, got %q", writtenCron)
+	}
+
+	if !strings.Contains(writtenCron, "45 23 * * * sudo systemctl stop play.video.service") {
+		t.Fatalf("expected stop entry for 23:45, got %q", writtenCron)
+	}
+
+	if !strings.Contains(writtenCron, "00 07 * * * sudo systemctl start play.video.service") {
+		t.Fatalf("expected start entry for 07:00, got %q", writtenCron)
+	}
+}
+
+func TestHandleScheduleUpdateClearsRest(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+
+	originalPlaylist := agent.PlaylistTimerPath
+	originalVideo := agent.VideoTimerPath
+	agent.PlaylistTimerPath = playlistTimer
+	agent.VideoTimerPath = videoTimer
+	t.Cleanup(func() {
+		agent.PlaylistTimerPath = originalPlaylist
+		agent.VideoTimerPath = originalVideo
+	})
+
+	originalRead := agent.CrontabReadFunc
+	originalWrite := agent.CrontabWriteFunc
+	t.Cleanup(func() {
+		agent.CrontabReadFunc = originalRead
+		agent.CrontabWriteFunc = originalWrite
+	})
+
+	existing := strings.Join([]string{
+		"# MEDIA_PI_REST STOP",
+		"15 20 * * * sudo systemctl stop play.video.service",
+		"# MEDIA_PI_REST START",
+		"45 21 * * * sudo systemctl start play.video.service",
+	}, "\n") + "\n"
+
+	agent.CrontabReadFunc = func() (string, error) {
+		return existing, nil
+	}
+
+	var (
+		writeCalled bool
+		writtenCron string
+	)
+	agent.CrontabWriteFunc = func(content string) error {
+		writeCalled = true
+		writtenCron = content
+		return nil
+	}
+
+	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandleScheduleUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	if !writeCalled {
+		t.Fatalf("expected crontab to be written")
+	}
+
+	if strings.Contains(writtenCron, "# MEDIA_PI_REST STOP") || strings.Contains(writtenCron, "# MEDIA_PI_REST START") {
+		t.Fatalf("expected rest markers to be removed, got %q", writtenCron)
+	}
+}
+
+func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+
+	originalPlaylist := agent.PlaylistTimerPath
+	originalVideo := agent.VideoTimerPath
+	agent.PlaylistTimerPath = playlistTimer
+	agent.VideoTimerPath = videoTimer
+	t.Cleanup(func() {
+		agent.PlaylistTimerPath = originalPlaylist
+		agent.VideoTimerPath = originalVideo
+	})
+
+	originalRead := agent.CrontabReadFunc
+	originalWrite := agent.CrontabWriteFunc
+	t.Cleanup(func() {
+		agent.CrontabReadFunc = originalRead
+		agent.CrontabWriteFunc = originalWrite
+	})
+
+	agent.CrontabReadFunc = func() (string, error) {
+		return "", nil
+	}
+
+	writeCalled := false
+	agent.CrontabWriteFunc = func(string) error {
+		writeCalled = true
+		return nil
+	}
+
+	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"12:00","stop":"10:00"},{"start":"13:00","stop":"11:00"}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandleScheduleUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+
+	if writeCalled {
+		t.Fatalf("crontab write should not be called on invalid data")
+	}
 }
 
 func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	actions := agent.GetMenuActions()
 
 	expectedIDs := []string{
-		"rest-time",
 		"playlist-select",
 		"schedule-get",
 		"schedule-update",

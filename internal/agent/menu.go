@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,13 +92,6 @@ func GetMenuActions() []MenuAction {
 			Description: "Upload playlist from remote source",
 			Method:      "POST",
 			Path:        "/api/menu/playlist/upload",
-		},
-		{
-			ID:          "rest-time",
-			Name:        "Задать время отдыха",
-			Description: "Set rest time interval with crontab",
-			Method:      "PUT",
-			Path:        "/api/menu/schedule/rest-time",
 		},
 		{
 			ID:          "playlist-select",
@@ -518,15 +512,6 @@ type RestTimePair struct {
 	Start string `json:"start"`
 }
 
-// RestTimeRequest represents the request to set rest time.
-// Legacy fields stop_time/start_time are still supported for clients that send a
-// single interval, but the preferred representation is the "times" array.
-type RestTimeRequest struct {
-	StopTime  string         `json:"stop_time"`
-	StartTime string         `json:"start_time"`
-	Times     []RestTimePair `json:"times"`
-}
-
 // FileContentRequest represents a request to update a file.
 type FileContentRequest struct {
 	Content string `json:"content"`
@@ -541,62 +526,9 @@ type ScheduleResponse struct {
 
 // ScheduleUpdateRequest represents the request to update timers for playlist and video uploads.
 type ScheduleUpdateRequest struct {
-	Playlist []string `json:"playlist"`
-	Video    []string `json:"video"`
-}
-
-// HandleSetRestTime sets the rest time interval using crontab.
-func HandleSetRestTime(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	var req RestTimeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный JSON в теле запроса",
-		})
-		return
-	}
-
-	pairs, err := restTimePairsFromRequest(req)
-	if err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: err.Error(),
-		})
-		return
-	}
-
-	if err := validateRestTimePairs(pairs); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: err.Error(),
-		})
-		return
-	}
-
-	if err := updateRestTimes(pairs); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
-		})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "rest-time",
-			Result:  "success",
-			Message: "Время отдыха обновлено",
-		},
-	})
+	Playlist []string        `json:"playlist"`
+	Video    []string        `json:"video"`
+	Rest     *[]RestTimePair `json:"rest"`
 }
 
 // HandlePlaylistSelect updates the playlist upload service configuration.
@@ -711,6 +643,28 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var restPairs []RestTimePair
+	if req.Rest != nil {
+		pairs, err := sanitizeRestPairs(*req.Rest)
+		if err != nil {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{
+				OK:     false,
+				ErrMsg: err.Error(),
+			})
+			return
+		}
+
+		if err := validateRestTimePairs(pairs); err != nil {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{
+				OK:     false,
+				ErrMsg: err.Error(),
+			})
+			return
+		}
+
+		restPairs = pairs
+	}
+
 	normalizedPlaylist, err := normalizeTimes(req.Playlist)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
@@ -745,6 +699,16 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Rest != nil {
+		if err := updateRestTimes(restPairs); err != nil {
+			JSONResponse(w, http.StatusInternalServerError, APIResponse{
+				OK:     false,
+				ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
+			})
+			return
+		}
+	}
+
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
@@ -755,41 +719,141 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func restTimePairsFromRequest(req RestTimeRequest) ([]RestTimePair, error) {
-	if len(req.Times) > 0 {
-		pairs := make([]RestTimePair, 0, len(req.Times))
-		for _, pair := range req.Times {
-			start := strings.TrimSpace(pair.Start)
-			stop := strings.TrimSpace(pair.Stop)
-			if start == "" || stop == "" {
-				return nil, errors.New("для каждого интервала необходимо указать start и stop")
-			}
-			pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
+func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
+	pairs := make([]RestTimePair, 0, len(raw))
+	for _, pair := range raw {
+		start := strings.TrimSpace(pair.Start)
+		stop := strings.TrimSpace(pair.Stop)
+		if start == "" || stop == "" {
+			return nil, errors.New("для каждого интервала необходимо указать start и stop")
 		}
-		return pairs, nil
+		pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
 	}
-
-	start := strings.TrimSpace(req.StartTime)
-	stop := strings.TrimSpace(req.StopTime)
-	if start == "" && stop == "" {
-		return nil, nil
-	}
-	if start == "" || stop == "" {
-		return nil, errors.New("необходимо указать и start_time, и stop_time")
-	}
-
-	return []RestTimePair{{Start: start, Stop: stop}}, nil
+	return pairs, nil
 }
 
 func validateRestTimePairs(pairs []RestTimePair) error {
-	for _, pair := range pairs {
-		if pair.Start == "" || pair.Stop == "" {
-			return errors.New("для каждого интервала необходимо указать start и stop")
-		}
+	if len(pairs) == 0 {
+		return nil
+	}
+
+	type parsedPair struct {
+		index int
+		start int
+		stop  int
+	}
+
+	parsed := make([]parsedPair, len(pairs))
+	occupied := make([]bool, 24*60)
+
+	for i, pair := range pairs {
 		if !isValidTimeFormat(pair.Start) || !isValidTimeFormat(pair.Stop) {
 			return errors.New("неверный формат времени. Используйте HH:MM")
 		}
+
+		startHour, startMinute, err := parseTimeValue(pair.Start)
+		if err != nil {
+			return err
+		}
+		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
+		if err != nil {
+			return err
+		}
+
+		startMin := startHour*60 + startMinute
+		stopMin := stopHour*60 + stopMinute
+		if startMin == stopMin {
+			return errors.New("интервал отдыха не может иметь нулевую длительность")
+		}
+
+		if err := markRestInterval(occupied, stopMin, startMin); err != nil {
+			return err
+		}
+
+		parsed[i] = parsedPair{index: i, start: startMin, stop: stopMin}
 	}
+
+	sort.SliceStable(parsed, func(i, j int) bool {
+		if parsed[i].stop == parsed[j].stop {
+			return parsed[i].index < parsed[j].index
+		}
+		return parsed[i].stop < parsed[j].stop
+	})
+
+	const day = 24 * 60
+	prevStop := -1
+	prevEnd := -1
+
+	for _, pair := range parsed {
+		timelineStop := pair.stop
+		timelineEnd := pair.start
+
+		if prevStop == -1 {
+			if timelineEnd <= timelineStop {
+				timelineEnd += day
+			}
+			prevStop = timelineStop
+			prevEnd = timelineEnd
+			continue
+		}
+
+		for timelineStop <= prevStop {
+			timelineStop += day
+		}
+
+		if timelineStop <= prevEnd {
+			return errors.New("конец интервала отдыха должен предшествовать началу следующего интервала")
+		}
+
+		for timelineEnd <= timelineStop {
+			timelineEnd += day
+		}
+
+		prevStop = timelineStop
+		prevEnd = timelineEnd
+	}
+
+	firstStop := parsed[0].stop
+	firstEnd := parsed[0].start
+	if firstEnd <= firstStop {
+		firstEnd += day
+	}
+
+	if prevStop != -1 {
+		nextCycleStart := firstStop + day
+		if prevEnd >= nextCycleStart {
+			return errors.New("конец интервала отдыха должен предшествовать началу следующего интервала")
+		}
+	}
+
+	return nil
+}
+
+func markRestInterval(occupied []bool, stopMin, startMin int) error {
+	day := len(occupied)
+	if day == 0 {
+		return nil
+	}
+
+	minute := stopMin % day
+	startTarget := startMin % day
+	steps := 0
+
+	for {
+		if occupied[minute] {
+			return errors.New("интервалы отдыха не должны пересекаться")
+		}
+		occupied[minute] = true
+		minute = (minute + 1) % day
+		steps++
+		if minute == startTarget {
+			break
+		}
+		if steps >= day {
+			return errors.New("интервал отдыха не может занимать целые сутки")
+		}
+	}
+
 	return nil
 }
 
@@ -1183,7 +1247,7 @@ func SanitizeSystemdValue(value string) string {
 			return r
 		}
 	}, value)
-	
+
 	// Trim leading/trailing whitespace that might have been introduced
 	return strings.TrimSpace(result)
 }
