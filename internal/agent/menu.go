@@ -451,7 +451,7 @@ func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
 	case "jack":
 		config = "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
 	default:
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "output must be 'hdmi' or 'jack'"})
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "output должен быть 'hdmi' или 'jack'"})
 		return
 	}
 
