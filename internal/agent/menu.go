@@ -335,7 +335,7 @@ func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := " defaults.pcm.card 0 \ndefaults.ctl.card 0"
+	config := "defaults.pcm.card 0 \ndefaults.ctl.card 0"
 	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
