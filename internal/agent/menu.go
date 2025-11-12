@@ -780,8 +780,6 @@ func normalizeTimes(times []string) ([]string, error) {
 		}
 		normalized = append(normalized, fmt.Sprintf("%02d:%02d", hour, minute))
 	}
-		normalized = append(normalized, fmt.Sprintf("%02d:%02d", hour, minute))
-	}
 	return normalized, nil
 }
 
