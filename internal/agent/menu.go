@@ -337,8 +337,35 @@ func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := "defaults.pcm.card 0 \ndefaults.ctl.card 0"
-	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
+	config := "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
+	
+	// Write to temporary file first
+	tmpFile, err := os.CreateTemp("", "asound-*.conf")
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось создать временный файл: %v", err),
+		})
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("warning: failed to remove temp file %s: %v\n", tmpPath, err)
+		}
+	}()
+
+	// Write configuration to temporary file
+	if err := os.WriteFile(tmpPath, []byte(config), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать конфигурацию: %v", err),
+		})
+		return
+	}
+
+	// Move temporary file to /etc/asound.conf using sudo with fixed arguments
+	cmd := exec.Command("sudo", "cp", tmpPath, "/etc/asound.conf")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
@@ -372,8 +399,35 @@ func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := "defaults.pcm.card 1 \ndefaults.ctl.card 1"
-	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
+	config := "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
+	
+	// Write to temporary file first
+	tmpFile, err := os.CreateTemp("", "asound-*.conf")
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось создать временный файл: %v", err),
+		})
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("warning: failed to remove temp file %s: %v\n", tmpPath, err)
+		}
+	}()
+
+	// Write configuration to temporary file
+	if err := os.WriteFile(tmpPath, []byte(config), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать конфигурацию: %v", err),
+		})
+		return
+	}
+
+	// Move temporary file to /etc/asound.conf using sudo with fixed arguments
+	cmd := exec.Command("sudo", "cp", tmpPath, "/etc/asound.conf")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
