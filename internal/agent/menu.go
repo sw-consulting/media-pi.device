@@ -366,7 +366,7 @@ func readPlaylistUploadConfig(path string) (PlaylistUploadConfig, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "ExecStart") {
+		if !strings.HasPrefix(trimmed, "ExecStart=") && !strings.HasPrefix(trimmed, "ExecStart ") {
 			continue
 		}
 
