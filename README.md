@@ -84,7 +84,8 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/playback/start` — запустить воспроизведение
 - `POST /api/menu/playback/stop` — остановить воспроизведение
 - `GET /api/menu/storage/check` — проверка яндекс диска
-- `POST /api/menu/playlist/upload` — загрузка плейлиста
+- `GET /api/menu/playlist/get` — получение настроек сервиса загрузки плейлистов
+- `PUT /api/menu/playlist/update` — обновление настроек сервиса загрузки плейлистов
 - `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
 - `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
 - `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)

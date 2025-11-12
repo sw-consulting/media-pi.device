@@ -95,7 +95,8 @@ func TestGetMenuActions(t *testing.T) {
 		"playback-stop",
 		"playback-start",
 		"storage-check",
-		"playlist-upload",
+		"playlist-get",
+		"playlist-update",
 		"playlist-select",
 		"schedule-get",
 		"schedule-update",
@@ -177,14 +178,28 @@ func TestHandleStorageCheckMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandlePlaylistUploadMethodNotAllowed(t *testing.T) {
+func TestHandlePlaylistGetMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/upload", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/playlist/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistUpload(w, req)
+	agent.HandlePlaylistGet(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandlePlaylistUpdateMethodNotAllowed(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/update", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandlePlaylistUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -216,6 +231,104 @@ func TestHandleAudioUpdateMethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandlePlaylistGet(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+
+	originalServicePath := agent.PlaylistServicePath
+	agent.PlaylistServicePath = servicePath
+	t.Cleanup(func() { agent.PlaylistServicePath = originalServicePath })
+
+	content := `[Unit]
+Description = Rsync playlist upload service
+[Service]
+ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/
+[Install]
+WantedBy = multi-user.target
+`
+
+	if err := os.WriteFile(servicePath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write service file: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/get", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandlePlaylistGet(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp agent.APIResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.OK {
+		t.Fatalf("expected OK response, got error: %s", resp.ErrMsg)
+	}
+
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected response data to be a map, got %T", resp.Data)
+	}
+
+	if got := data["source"]; got != "/mnt/src/playlist/" {
+		t.Fatalf("unexpected source, got %v", got)
+	}
+	if got := data["destination"]; got != "/mnt/dst/playlist/" {
+		t.Fatalf("unexpected destination, got %v", got)
+	}
+}
+
+func TestHandlePlaylistUpdate(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+
+	originalServicePath := agent.PlaylistServicePath
+	agent.PlaylistServicePath = servicePath
+	t.Cleanup(func() { agent.PlaylistServicePath = originalServicePath })
+
+	content := `[Unit]
+Description = Rsync playlist upload service
+[Service]
+ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/
+ExecStartPost = /home/pi/videoplay.sh
+[Install]
+WantedBy = multi-user.target
+`
+
+	if err := os.WriteFile(servicePath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write service file: %v", err)
+	}
+
+	body := strings.NewReader(`{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/playlist/update", body)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandlePlaylistUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	updated, err := os.ReadFile(servicePath)
+	if err != nil {
+		t.Fatalf("failed to read updated service file: %v", err)
+	}
+
+	if !strings.Contains(string(updated), "ExecStart = /usr/bin/rsync -czavP /mnt/ya.disk/playlist/test/ /mnt/usb/playlist/") {
+		t.Fatalf("updated service file does not contain new paths:\n%s", string(updated))
 	}
 }
 
@@ -798,6 +911,8 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	actions := agent.GetMenuActions()
 
 	expectedIDs := []string{
+		"playlist-get",
+		"playlist-update",
 		"playlist-select",
 		"schedule-get",
 		"schedule-update",

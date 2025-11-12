@@ -116,11 +116,18 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/storage/check",
 		},
 		{
-			ID:          "playlist-upload",
-			Name:        "Загрузка плейлиста",
-			Description: "Загрузить плейлист из удалённого источника",
-			Method:      "POST",
-			Path:        "/api/menu/playlist/upload",
+			ID:          "playlist-get",
+			Name:        "Получить источник плейлиста",
+			Description: "Получить конфигурацию сервиса загрузки плейлистов",
+			Method:      "GET",
+			Path:        "/api/menu/playlist/get",
+		},
+		{
+			ID:          "playlist-update",
+			Name:        "Обновить источник плейлиста",
+			Description: "Обновить пути источника и назначения для сервиса загрузки плейлистов",
+			Method:      "PUT",
+			Path:        "/api/menu/playlist/update",
 		},
 		{
 			ID:          "playlist-select",
@@ -340,9 +347,103 @@ func HandleStorageCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandlePlaylistUpload triggers playlist upload service.
-func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+// PlaylistUploadConfig represents the relevant configuration extracted from
+// playlist.upload.service.
+type PlaylistUploadConfig struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// readPlaylistUploadConfig parses the playlist upload service file and returns
+// the configured source and destination paths.
+func readPlaylistUploadConfig(path string) (PlaylistUploadConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PlaylistUploadConfig{}, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "ExecStart") {
+			continue
+		}
+
+		eqIdx := strings.Index(line, "=")
+		if eqIdx == -1 {
+			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит '='")
+		}
+
+		command := strings.TrimSpace(line[eqIdx+1:])
+		fields := strings.Fields(command)
+		if len(fields) < 2 {
+			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
+		}
+
+		return PlaylistUploadConfig{
+			Source:      fields[len(fields)-2],
+			Destination: fields[len(fields)-1],
+		}, nil
+	}
+
+	if err := scanner.Err(); err != nil {
+		return PlaylistUploadConfig{}, err
+	}
+
+	return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не найдена")
+}
+
+// writePlaylistUploadConfig updates the ExecStart line in the playlist upload
+// service file, preserving other parts of the file intact while replacing the
+// source and destination paths.
+func writePlaylistUploadConfig(path, source, destination string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	updated := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "ExecStart") {
+			continue
+		}
+
+		eqIdx := strings.Index(line, "=")
+		if eqIdx == -1 {
+			return fmt.Errorf("строка ExecStart не содержит '='")
+		}
+
+		command := strings.TrimSpace(line[eqIdx+1:])
+		fields := strings.Fields(command)
+		if len(fields) < 2 {
+			return fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
+		}
+
+		prefixFields := append([]string{}, fields[:len(fields)-2]...)
+		prefixFields = append(prefixFields, source, destination)
+
+		newCommand := strings.Join(prefixFields, " ")
+		lhs := strings.TrimSpace(line[:eqIdx])
+		lines[i] = fmt.Sprintf("%s = %s", lhs, newCommand)
+		updated = true
+		break
+	}
+
+	if !updated {
+		return fmt.Errorf("строка ExecStart не найдена")
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// HandlePlaylistGet returns the source and destination configured for the
+// playlist upload service.
+func HandlePlaylistGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
 			ErrMsg: "Метод не разрешён",
@@ -350,49 +451,69 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := getDBusConnection(context.Background())
+	cfg, err := readPlaylistUploadConfig(PlaylistServicePath)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err),
 		})
 		return
 	}
-	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: cfg})
+}
 
-	ch := make(chan string, 1)
-	_, err = conn.StartUnitContext(ctx, "playlist.upload.service", "replace", ch)
-	if err != nil {
+// PlaylistUpdateRequest represents a request to update playlist upload source
+// and destination paths.
+type PlaylistUpdateRequest struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// HandlePlaylistUpdate writes a new source and destination to the
+// playlist.upload.service file.
+func HandlePlaylistUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req PlaylistUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	req.Source = strings.TrimSpace(req.Source)
+	req.Destination = strings.TrimSpace(req.Destination)
+
+	if req.Source == "" || req.Destination == "" {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Поля source и destination обязательны",
+		})
+		return
+	}
+
+	if err := writePlaylistUploadConfig(PlaylistServicePath, req.Source, req.Destination); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось загрузить плейлист: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err),
 		})
 		return
 	}
 
-	var result string
-	select {
-	case result = <-ch:
-		// Successfully received result from D-Bus operation
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{
-			OK:     false,
-			ErrMsg: "Таймаут при загрузке плейлиста",
-		})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "playlist-upload",
-			Result:  result,
-			Message: "Загрузка плейлиста",
-		},
-	})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{
+		Action:  "playlist-update",
+		Result:  "success",
+		Message: "Конфигурация плейлиста обновлена",
+	}})
 }
 
 // (removed deprecated handlers: audio-hdmi and audio-jack)
