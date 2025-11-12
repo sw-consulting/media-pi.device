@@ -88,8 +88,8 @@ sudo systemctl status media-pi-agent
 - `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
 - `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
 - `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
-- `POST /api/menu/audio/hdmi` — настройка HDMI аудио
-- `POST /api/menu/audio/jack` — настройка 3.5mm Jack аудио
+- `GET /api/menu/audio/get` — получить текущие настройки аудио
+- `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)
 - `POST /api/menu/system/reboot` — перезагрузка системы
 - `POST /api/menu/system/shutdown` — выключение системы
