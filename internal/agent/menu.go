@@ -352,7 +352,17 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := <-ch
+	var result string
+	select {
+	case result = <-ch:
+		// Successfully received result from D-Bus operation
+	case <-ctx.Done():
+		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{
+			OK:     false,
+			ErrMsg: "Таймаут при загрузке плейлиста",
+		})
+		return
+	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
