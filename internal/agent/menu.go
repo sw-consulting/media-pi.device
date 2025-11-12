@@ -370,7 +370,7 @@ func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := " defaults.pcm.card 1 \ndefaults.ctl.card 1"
+	config := "defaults.pcm.card 1 \ndefaults.ctl.card 1"
 	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
