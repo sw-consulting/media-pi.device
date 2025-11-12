@@ -21,11 +21,12 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// Configurable paths for timer files. Tests may override these to point to
+// Configurable paths for timer and service files. Tests may override these to point to
 // temporary locations to avoid requiring root file system access.
 var (
-	PlaylistTimerPath = "/etc/systemd/system/playlist.upload.timer"
-	VideoTimerPath    = "/etc/systemd/system/video.upload.timer"
+	PlaylistTimerPath   = "/etc/systemd/system/playlist.upload.timer"
+	VideoTimerPath      = "/etc/systemd/system/video.upload.timer"
+	PlaylistServicePath = "/etc/systemd/system/playlist.upload.service"
 )
 
 // AudioConfigPath is the path to the ALSA config file controlling audio output.
@@ -623,8 +624,7 @@ func HandlePlaylistSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := "/etc/systemd/system/playlist.upload.service"
-	if err := os.WriteFile(filePath, []byte(req.Content), 0644); err != nil {
+	if err := os.WriteFile(PlaylistServicePath, []byte(req.Content), 0644); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
