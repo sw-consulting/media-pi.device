@@ -82,6 +82,7 @@ sudo systemctl status media-pi-agent
 ## API Endpoints
 
 - `POST /api/menu/playback/start` — запустить воспроизведение
+- `POST /api/menu/playback/stop` — остановить воспроизведение
 - `GET /api/menu/storage/check` — проверка яндекс диска
 - `POST /api/menu/playlist/upload` — загрузка плейлиста
 - `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
