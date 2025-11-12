@@ -337,10 +337,9 @@ func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := "defaults.pcm.card 0 \ndefaults.ctl.card 0"
-	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	config := "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
+	
+	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось настроить HDMI аудио: %v", err),
@@ -356,10 +355,6 @@ func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 			Message: "HDMI",
 		},
 	})
-
-	if len(output) > 0 {
-		fmt.Printf("audio-hdmi output: %s\n", string(output))
-	}
 }
 
 // HandleAudioJack configures 3.5mm jack audio output.
@@ -372,10 +367,9 @@ func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config := "defaults.pcm.card 1 \ndefaults.ctl.card 1"
-	cmd := exec.Command("sudo", "bash", "-c", fmt.Sprintf("echo -e '%s' > /etc/asound.conf", config))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	config := "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
+	
+	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось настроить 3.5 Jack аудио: %v", err),
@@ -391,10 +385,6 @@ func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
 			Message: "3.5 Jack",
 		},
 	})
-
-	if len(output) > 0 {
-		fmt.Printf("audio-jack output: %s\n", string(output))
-	}
 }
 
 // HandleSystemReload reloads systemd daemon configuration.
