@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // Configurable paths for timer files. Tests may override these to point to
@@ -23,6 +25,19 @@ import (
 var (
 	PlaylistTimerPath = "/etc/systemd/system/playlist.upload.timer"
 	VideoTimerPath    = "/etc/systemd/system/video.upload.timer"
+)
+
+const (
+	restStopMarker   = "# MEDIA_PI_REST STOP"
+	restStartMarker  = "# MEDIA_PI_REST START"
+	restStopCommand  = "sudo systemctl stop play.video.service"
+	restStartCommand = "sudo systemctl start play.video.service"
+)
+
+var (
+	CrontabReadFunc  = defaultCrontabRead
+	CrontabWriteFunc = defaultCrontabWrite
+	cronParser       = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -338,7 +353,7 @@ func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config := "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
-	
+
 	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -368,7 +383,7 @@ func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config := "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
-	
+
 	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -497,10 +512,19 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// RestTimePair describes a single rest-time interval with start and stop times.
+type RestTimePair struct {
+	Stop  string `json:"stop"`
+	Start string `json:"start"`
+}
+
 // RestTimeRequest represents the request to set rest time.
+// Legacy fields stop_time/start_time are still supported for clients that send a
+// single interval, but the preferred representation is the "times" array.
 type RestTimeRequest struct {
-	StopTime  string `json:"stop_time"`  // Format: "HH:MM"
-	StartTime string `json:"start_time"` // Format: "HH:MM"
+	StopTime  string         `json:"stop_time"`
+	StartTime string         `json:"start_time"`
+	Times     []RestTimePair `json:"times"`
 }
 
 // FileContentRequest represents a request to update a file.
@@ -510,8 +534,9 @@ type FileContentRequest struct {
 
 // ScheduleResponse represents the current update schedule.
 type ScheduleResponse struct {
-	Playlist []string `json:"playlist"`
-	Video    []string `json:"video"`
+	Playlist []string       `json:"playlist"`
+	Video    []string       `json:"video"`
+	Rest     []RestTimePair `json:"rest,omitempty"`
 }
 
 // ScheduleUpdateRequest represents the request to update timers for playlist and video uploads.
@@ -539,57 +564,27 @@ func HandleSetRestTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate time format (HH:MM)
-	if !isValidTimeFormat(req.StopTime) || !isValidTimeFormat(req.StartTime) {
+	pairs, err := restTimePairsFromRequest(req)
+	if err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
-			ErrMsg: "Неверный формат времени. Используйте HH:MM",
+			ErrMsg: err.Error(),
 		})
 		return
 	}
 
-	// Parse times
-	stopParts := strings.Split(req.StopTime, ":")
-	startParts := strings.Split(req.StartTime, ":")
-
-	// Create crontab entries
-	crontabContent := fmt.Sprintf("%s %s * * * sudo systemctl stop play.video.service\n%s %s * * * sudo systemctl start play.video.service\n",
-		stopParts[1], stopParts[0], startParts[1], startParts[0])
-
-	// Write to temporary file
-	tmpFile, err := os.CreateTemp("", "crontab-*")
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+	if err := validateRestTimePairs(pairs); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось создать временный файл: %v", err),
+			ErrMsg: err.Error(),
 		})
 		return
 	}
-	defer func() {
-		if err := os.Remove(tmpFile.Name()); err != nil {
-			// Log the error but do not fail the request because cleanup
-			// failure is non-fatal.
-			fmt.Printf("warning: failed to remove temp file %s: %v\n", tmpFile.Name(), err)
-		}
-	}()
 
-	if _, err := tmpFile.WriteString(crontabContent); err != nil {
+	if err := updateRestTimes(pairs); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать crontab: %v", err),
-		})
-		return
-	}
-	if err := tmpFile.Close(); err != nil {
-		fmt.Printf("warning: failed to close temp file %s: %v\n", tmpFile.Name(), err)
-	}
-
-	// Install crontab
-	cmd := exec.Command("crontab", tmpFile.Name())
-	if output, err := cmd.CombinedOutput(); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось установить crontab: %v, %s", err, string(output)),
+			ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
 		})
 		return
 	}
@@ -599,7 +594,7 @@ func HandleSetRestTime(w http.ResponseWriter, r *http.Request) {
 		Data: MenuActionResponse{
 			Action:  "rest-time",
 			Result:  "success",
-			Message: "Время отдыха задано",
+			Message: "Время отдыха обновлено",
 		},
 	})
 }
@@ -670,11 +665,21 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	restTimes, err := getRestTimes()
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось прочитать crontab: %v", err),
+		})
+		return
+	}
+
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: ScheduleResponse{
 			Playlist: playlistTimers,
 			Video:    videoTimers,
+			Rest:     restTimes,
 		},
 	})
 }
@@ -748,6 +753,298 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 			Message: "Расписание обновлений обновлено",
 		},
 	})
+}
+
+func restTimePairsFromRequest(req RestTimeRequest) ([]RestTimePair, error) {
+	if len(req.Times) > 0 {
+		pairs := make([]RestTimePair, 0, len(req.Times))
+		for _, pair := range req.Times {
+			start := strings.TrimSpace(pair.Start)
+			stop := strings.TrimSpace(pair.Stop)
+			if start == "" || stop == "" {
+				return nil, errors.New("для каждого интервала необходимо указать start и stop")
+			}
+			pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
+		}
+		return pairs, nil
+	}
+
+	start := strings.TrimSpace(req.StartTime)
+	stop := strings.TrimSpace(req.StopTime)
+	if start == "" && stop == "" {
+		return nil, nil
+	}
+	if start == "" || stop == "" {
+		return nil, errors.New("необходимо указать и start_time, и stop_time")
+	}
+
+	return []RestTimePair{{Start: start, Stop: stop}}, nil
+}
+
+func validateRestTimePairs(pairs []RestTimePair) error {
+	for _, pair := range pairs {
+		if pair.Start == "" || pair.Stop == "" {
+			return errors.New("для каждого интервала необходимо указать start и stop")
+		}
+		if !isValidTimeFormat(pair.Start) || !isValidTimeFormat(pair.Stop) {
+			return errors.New("неверный формат времени. Используйте HH:MM")
+		}
+	}
+	return nil
+}
+
+func updateRestTimes(pairs []RestTimePair) error {
+	content, err := CrontabReadFunc()
+	if err != nil {
+		return err
+	}
+
+	lines := splitCrontabLines(content)
+	lines = filterOutRestEntries(lines)
+
+	restEntries, err := buildRestCronEntries(pairs)
+	if err != nil {
+		return err
+	}
+
+	if len(restEntries) > 0 {
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+			lines = append(lines, "")
+		}
+		lines = append(lines, restEntries...)
+	} else {
+		lines = trimTrailingEmptyLines(lines)
+	}
+
+	return CrontabWriteFunc(joinCrontabLines(lines))
+}
+
+func getRestTimes() ([]RestTimePair, error) {
+	content, err := CrontabReadFunc()
+	if err != nil {
+		return nil, err
+	}
+	return parseRestTimes(content), nil
+}
+
+func parseRestTimes(content string) []RestTimePair {
+	lines := splitCrontabLines(content)
+	pairs := make([]RestTimePair, 0)
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		switch trimmed {
+		case restStopMarker:
+			if i+1 < len(lines) {
+				if timeValue, err := parseCronCommandTime(lines[i+1], restStopCommand); err == nil {
+					pairs = append(pairs, RestTimePair{Stop: timeValue})
+					i++
+				}
+			}
+		case restStartMarker:
+			if i+1 < len(lines) {
+				if timeValue, err := parseCronCommandTime(lines[i+1], restStartCommand); err == nil {
+					if len(pairs) == 0 || pairs[len(pairs)-1].Start != "" {
+						pairs = append(pairs, RestTimePair{Start: timeValue})
+					} else {
+						pairs[len(pairs)-1].Start = timeValue
+					}
+					i++
+				}
+			}
+		default:
+			if isRestCommandLine(lines[i], restStopCommand) {
+				if timeValue, err := parseCronCommandTime(lines[i], restStopCommand); err == nil {
+					pairs = append(pairs, RestTimePair{Stop: timeValue})
+				}
+			} else if isRestCommandLine(lines[i], restStartCommand) {
+				if timeValue, err := parseCronCommandTime(lines[i], restStartCommand); err == nil {
+					if len(pairs) == 0 || pairs[len(pairs)-1].Start != "" {
+						pairs = append(pairs, RestTimePair{Start: timeValue})
+					} else {
+						pairs[len(pairs)-1].Start = timeValue
+					}
+				}
+			}
+		}
+	}
+
+	cleaned := make([]RestTimePair, 0, len(pairs))
+	for _, pair := range pairs {
+		if pair.Start == "" || pair.Stop == "" {
+			continue
+		}
+		cleaned = append(cleaned, pair)
+	}
+	return cleaned
+}
+
+func splitCrontabLines(content string) []string {
+	if content == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func joinCrontabLines(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func trimTrailingEmptyLines(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func filterOutRestEntries(lines []string) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+	result := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		switch trimmed {
+		case restStopMarker:
+			if i+1 < len(lines) && isRestCommandLine(lines[i+1], restStopCommand) {
+				i++
+			}
+			continue
+		case restStartMarker:
+			if i+1 < len(lines) && isRestCommandLine(lines[i+1], restStartCommand) {
+				i++
+			}
+			continue
+		}
+		if isRestCommandLine(lines[i], restStopCommand) || isRestCommandLine(lines[i], restStartCommand) {
+			continue
+		}
+		result = append(result, lines[i])
+	}
+	return result
+}
+
+func buildRestCronEntries(pairs []RestTimePair) ([]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	entries := make([]string, 0, len(pairs)*5)
+	for idx, pair := range pairs {
+		startHour, startMinute, err := parseTimeValue(pair.Start)
+		if err != nil {
+			return nil, err
+		}
+		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
+		if err != nil {
+			return nil, err
+		}
+		if idx > 0 {
+			entries = append(entries, "")
+		}
+		entries = append(entries, restStopMarker)
+		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", stopMinute, stopHour, restStopCommand))
+		entries = append(entries, restStartMarker)
+		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", startMinute, startHour, restStartCommand))
+	}
+	return entries, nil
+}
+
+func parseTimeValue(value string) (int, int, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("неверный формат времени: %s", value)
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("неверный формат часа: %s", value)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("неверный формат минут: %s", value)
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, fmt.Errorf("время вне диапазона: %s", value)
+	}
+	return hour, minute, nil
+}
+
+func parseCronCommandTime(line, expectedCommand string) (string, error) {
+	expr, command, err := splitCronLine(line)
+	if err != nil {
+		return "", err
+	}
+	if command != expectedCommand {
+		return "", fmt.Errorf("неожиданная команда: %s", command)
+	}
+	if _, err := cronParser.Parse(expr); err != nil {
+		return "", err
+	}
+	fields := strings.Fields(expr)
+	if len(fields) < 2 {
+		return "", fmt.Errorf("недостаточно полей в cron: %s", expr)
+	}
+	minute, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return "", err
+	}
+	hour, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return "", err
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return "", fmt.Errorf("время вне диапазона в cron: %s", expr)
+	}
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
+}
+
+func isRestCommandLine(line, expectedCommand string) bool {
+	_, command, err := splitCronLine(strings.TrimSpace(line))
+	if err != nil {
+		return false
+	}
+	return command == expectedCommand
+}
+
+func splitCronLine(line string) (string, string, error) {
+	fields := strings.Fields(line)
+	if len(fields) < 6 {
+		return "", "", fmt.Errorf("невалидная строка cron: %s", line)
+	}
+	expr := strings.Join(fields[:5], " ")
+	command := strings.Join(fields[5:], " ")
+	return expr, command, nil
+}
+
+func defaultCrontabRead() (string, error) {
+	cmd := exec.Command("crontab", "-l")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.ToLower(string(output))
+		if text == "" {
+			text = strings.ToLower(err.Error())
+		}
+		if strings.Contains(text, "no crontab for") {
+			return "", nil
+		}
+		return "", fmt.Errorf("crontab -l: %w: %s", err, string(output))
+	}
+	return string(output), nil
+}
+
+func defaultCrontabWrite(content string) error {
+	cmd := exec.Command("crontab", "-")
+	cmd.Stdin = strings.NewReader(content)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("crontab -: %w: %s", err, string(output))
+	}
+	return nil
 }
 
 func hasInvalidTimes(lists ...[]string) bool {
