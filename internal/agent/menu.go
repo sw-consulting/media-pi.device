@@ -774,13 +774,12 @@ func hasInvalidTimes(lists ...[]string) bool {
 func normalizeTimes(times []string) ([]string, error) {
 	normalized := make([]string, 0, len(times))
 	for _, t := range times {
-		if t == "" {
-			return nil, fmt.Errorf("пустое значение времени")
-		}
 		hour, minute, err := parseHourMinute(t)
 		if err != nil {
 			return nil, err
 		}
+		normalized = append(normalized, fmt.Sprintf("%02d:%02d", hour, minute))
+	}
 		normalized = append(normalized, fmt.Sprintf("%02d:%02d", hour, minute))
 	}
 	return normalized, nil
