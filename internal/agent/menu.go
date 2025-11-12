@@ -408,7 +408,7 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "ExecStart") {
+		if !strings.HasPrefix(trimmed, "ExecStart=") && !strings.HasPrefix(trimmed, "ExecStart ") {
 			continue
 		}
 
