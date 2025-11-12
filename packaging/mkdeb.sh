@@ -203,7 +203,7 @@ fi
 
 echo ""
 echo "For uninstallation, run: sudo apt remove media-pi-agent"
-echo "For upgrade run: sudo apt install ./media-pi-agent.deb, it will handle automatic service stop/start for upgrades"
+echo "For upgrade, run: sudo apt install ./media-pi-agent.deb, it will handle automatic service stop/start for upgrades"
 exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/postinst"
