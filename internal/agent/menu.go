@@ -1164,19 +1164,47 @@ func extractTimeFromOnCalendar(line string) (string, bool) {
 	return fmt.Sprintf("%02d:%02d", hour, minute), true
 }
 
+// SanitizeSystemdValue sanitizes a string value for use in systemd unit files.
+// It removes or replaces characters that could break the unit file format or
+// be used for injection attacks, particularly newlines and carriage returns.
+func SanitizeSystemdValue(value string) string {
+	// Replace newlines, carriage returns, and other control characters with spaces
+	// to prevent breaking the unit file format or injection attacks
+	result := strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t', '\f', '\v':
+			return ' ' // Replace control characters with space
+		case '\x00': // Null character
+			return -1 // Remove null characters
+		default:
+			if r < 32 && r != ' ' {
+				return ' ' // Replace other control characters with space
+			}
+			return r
+		}
+	}, value)
+	
+	// Trim leading/trailing whitespace that might have been introduced
+	return strings.TrimSpace(result)
+}
+
 func writeTimerSchedule(filePath, description, unit string, times []string) error {
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return err
 	}
 
+	// Sanitize description and unit to prevent injection attacks
+	sanitizedDescription := SanitizeSystemdValue(description)
+	sanitizedUnit := SanitizeSystemdValue(unit)
+
 	var builder strings.Builder
 	builder.WriteString("[Unit]\n")
-	builder.WriteString(fmt.Sprintf("Description = %s\n\n", description))
+	builder.WriteString(fmt.Sprintf("Description = %s\n\n", sanitizedDescription))
 	builder.WriteString("[Timer]\n")
 	for _, t := range times {
 		builder.WriteString(fmt.Sprintf("OnCalendar=--* %s:00\n", t))
 	}
-	builder.WriteString(fmt.Sprintf("Unit=%s\n", unit))
+	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
 	builder.WriteString("Persistent=true\n")
 	builder.WriteString("User=pi\n\n")
 	builder.WriteString("[Install]\n")

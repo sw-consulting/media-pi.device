@@ -701,3 +701,86 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeSystemdValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Normal string unchanged",
+			input:    "Playlist upload timer",
+			expected: "Playlist upload timer",
+		},
+		{
+			name:     "Newline replaced with space",
+			input:    "First line\nSecond line",
+			expected: "First line Second line",
+		},
+		{
+			name:     "Carriage return replaced with space",
+			input:    "First part\rSecond part",
+			expected: "First part Second part",
+		},
+		{
+			name:     "Tab replaced with space",
+			input:    "Part1\tPart2",
+			expected: "Part1 Part2",
+		},
+		{
+			name:     "Multiple newlines collapsed",
+			input:    "Line1\n\n\nLine2",
+			expected: "Line1   Line2",
+		},
+		{
+			name:     "Mixed control characters",
+			input:    "Text\nwith\rmixed\tcontrol\fchars\vhere",
+			expected: "Text with mixed control chars here",
+		},
+		{
+			name:     "Null character removed",
+			input:    "Text\x00with\x00nulls",
+			expected: "Textwithnulls",
+		},
+		{
+			name:     "Leading and trailing whitespace trimmed",
+			input:    "  \n\tTrimmed text\r\n  ",
+			expected: "Trimmed text",
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Only whitespace",
+			input:    "   \n\t\r   ",
+			expected: "",
+		},
+		{
+			name:     "Special characters preserved",
+			input:    "Timer-2.0_test (active)",
+			expected: "Timer-2.0_test (active)",
+		},
+		{
+			name:     "Unicode characters preserved",
+			input:    "Таймер загрузки 音乐",
+			expected: "Таймер загрузки 音乐",
+		},
+		{
+			name:     "Potential injection attempt",
+			input:    "Timer\n[Service]\nExecStart=/bin/malicious",
+			expected: "Timer [Service] ExecStart=/bin/malicious",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := agent.SanitizeSystemdValue(tt.input)
+			if result != tt.expected {
+				t.Errorf("SanitizeSystemdValue(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
