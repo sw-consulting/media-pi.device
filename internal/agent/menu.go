@@ -762,7 +762,7 @@ func restTimePairsFromRequest(req RestTimeRequest) ([]RestTimePair, error) {
 			start := strings.TrimSpace(pair.Start)
 			stop := strings.TrimSpace(pair.Stop)
 			if start == "" || stop == "" {
-				return nil, errors.New("Для каждого интервала необходимо указать start и stop")
+				return nil, errors.New("для каждого интервала необходимо указать start и stop")
 			}
 			pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
 		}
@@ -775,7 +775,7 @@ func restTimePairsFromRequest(req RestTimeRequest) ([]RestTimePair, error) {
 		return nil, nil
 	}
 	if start == "" || stop == "" {
-		return nil, errors.New("Необходимо указать и start_time, и stop_time")
+		return nil, errors.New("необходимо указать и start_time, и stop_time")
 	}
 
 	return []RestTimePair{{Start: start, Stop: stop}}, nil
@@ -784,10 +784,10 @@ func restTimePairsFromRequest(req RestTimeRequest) ([]RestTimePair, error) {
 func validateRestTimePairs(pairs []RestTimePair) error {
 	for _, pair := range pairs {
 		if pair.Start == "" || pair.Stop == "" {
-			return errors.New("Для каждого интервала необходимо указать start и stop")
+			return errors.New("для каждого интервала необходимо указать start и stop")
 		}
 		if !isValidTimeFormat(pair.Start) || !isValidTimeFormat(pair.Stop) {
-			return errors.New("Неверный формат времени. Используйте HH:MM")
+			return errors.New("неверный формат времени. Используйте HH:MM")
 		}
 	}
 	return nil
