@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -96,8 +98,8 @@ func TestGetMenuActions(t *testing.T) {
 		"playlist-upload",
 		"rest-time",
 		"playlist-select",
-		"playlist-update-time",
-		"video-update-time",
+		"schedule-get",
+		"schedule-update",
 		"audio-hdmi",
 		"audio-jack",
 		"system-reload",
@@ -288,83 +290,180 @@ func TestHandlePlaylistSelectMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandlePlaylistUpdateTimeMethodNotAllowed(t *testing.T) {
+func TestHandleScheduleGetMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/playlist-update", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/schedule/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistUpdateTime(w, req)
+	agent.HandleScheduleGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
-func TestHandleVideoUpdateTimeMethodNotAllowed(t *testing.T) {
+func TestHandleScheduleUpdateMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/video-update", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleVideoUpdateTime(w, req)
+	agent.HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
-func TestHandlePlaylistUpdateTimeValidation(t *testing.T) {
+func TestHandleScheduleGetReturnsTimers(t *testing.T) {
 	agent.ServerKey = "test-key"
-	// override timer path so handler can write without root
-	tmp := t.TempDir()
-	tmpPlaylist := filepath.Join(tmp, "playlist.timer")
-	agent.PlaylistTimerPath = tmpPlaylist
 
-	// invalid time
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/playlist-update", strings.NewReader(`{"time":"25:00"}`))
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-	agent.HandlePlaylistUpdateTime(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for invalid time, got %d", w.Code)
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+
+	originalPlaylist := agent.PlaylistTimerPath
+	originalVideo := agent.VideoTimerPath
+	agent.PlaylistTimerPath = playlistTimer
+	agent.VideoTimerPath = videoTimer
+	t.Cleanup(func() {
+		agent.PlaylistTimerPath = originalPlaylist
+		agent.VideoTimerPath = originalVideo
+	})
+
+	playlistContent := ` [Unit]
+Description = Playlist upload timer
+
+[Timer]
+OnCalendar=--* 12:32:00
+OnCalendar=--* 16:28:00
+
+[Install]
+WantedBy=timers.target
+`
+	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
+		t.Fatalf("failed to write playlist timer: %v", err)
 	}
 
-	// valid time
-	req = httptest.NewRequest(http.MethodPut, "/api/menu/schedule/playlist-update", strings.NewReader(`{"time":"08:30"}`))
+	videoContent := `[Unit]
+Description = Video upload timer
+
+[Timer]
+OnCalendar=--* 22:22:00
+
+[Install]
+WantedBy=timers.target
+`
+	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
+		t.Fatalf("failed to write video timer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	agent.HandlePlaylistUpdateTime(w, req)
+	w := httptest.NewRecorder()
+
+	agent.HandleScheduleGet(w, req)
+
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for valid time, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		OK   bool                   `json:"ok"`
+		Data agent.ScheduleResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if !resp.OK {
+		t.Fatalf("expected ok response")
+	}
+
+	expectedPlaylist := []string{"12:32", "16:28"}
+	if !reflect.DeepEqual(expectedPlaylist, resp.Data.Playlist) {
+		t.Fatalf("unexpected playlist timers: %#v", resp.Data.Playlist)
+	}
+
+	expectedVideo := []string{"22:22"}
+	if !reflect.DeepEqual(expectedVideo, resp.Data.Video) {
+		t.Fatalf("unexpected video timers: %#v", resp.Data.Video)
 	}
 }
 
-func TestHandleVideoUpdateTimeValidation(t *testing.T) {
+func TestHandleScheduleUpdateValidation(t *testing.T) {
 	agent.ServerKey = "test-key"
-	// override timer path so handler can write without root
-	tmp := t.TempDir()
-	tmpVideo := filepath.Join(tmp, "video.timer")
-	agent.VideoTimerPath = tmpVideo
 
-	// invalid time
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/video-update", strings.NewReader(`{"time":"99:99"}`))
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+
+	originalPlaylist := agent.PlaylistTimerPath
+	originalVideo := agent.VideoTimerPath
+	agent.PlaylistTimerPath = playlistTimer
+	agent.VideoTimerPath = videoTimer
+	t.Cleanup(func() {
+		agent.PlaylistTimerPath = originalPlaylist
+		agent.VideoTimerPath = originalVideo
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(`{"playlist":["25:00"],"video":["08:00"]}`))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	agent.HandleVideoUpdateTime(w, req)
+
+	agent.HandleScheduleUpdate(w, req)
+
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for invalid time, got %d", w.Code)
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleScheduleUpdateWritesTimers(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+
+	originalPlaylist := agent.PlaylistTimerPath
+	originalVideo := agent.VideoTimerPath
+	agent.PlaylistTimerPath = playlistTimer
+	agent.VideoTimerPath = videoTimer
+	t.Cleanup(func() {
+		agent.PlaylistTimerPath = originalPlaylist
+		agent.VideoTimerPath = originalVideo
+	})
+
+	body := `{"playlist":["6:05","16:28"],"video":["22:22"]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	agent.HandleScheduleUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	// valid time
-	req = httptest.NewRequest(http.MethodPut, "/api/menu/schedule/video-update", strings.NewReader(`{"time":"23:59"}`))
-	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	agent.HandleVideoUpdateTime(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 for valid time, got %d", w.Code)
+	playlistData, err := os.ReadFile(playlistTimer)
+	if err != nil {
+		t.Fatalf("failed to read playlist timer: %v", err)
+	}
+
+	if !strings.Contains(string(playlistData), "OnCalendar=--* 06:05:00") {
+		t.Fatalf("expected normalized playlist time in file, got %s", string(playlistData))
+	}
+
+	videoData, err := os.ReadFile(videoTimer)
+	if err != nil {
+		t.Fatalf("failed to read video timer: %v", err)
+	}
+
+	if !strings.Contains(string(videoData), "OnCalendar=--* 22:22:00") {
+		t.Fatalf("expected video time in file, got %s", string(videoData))
 	}
 }
 
@@ -374,8 +473,8 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	expectedIDs := []string{
 		"rest-time",
 		"playlist-select",
-		"playlist-update-time",
-		"video-update-time",
+		"schedule-get",
+		"schedule-update",
 	}
 
 	foundIDs := make(map[string]bool)

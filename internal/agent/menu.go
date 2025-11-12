@@ -4,16 +4,18 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/coreos/go-systemd/v22/dbus"
 )
 
 // Configurable paths for timer files. Tests may override these to point to
@@ -90,18 +92,18 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/playlist/select",
 		},
 		{
-			ID:          "playlist-update-time",
-			Name:        "Время обновления плейлиста",
-			Description: "Set playlist update schedule",
-			Method:      "PUT",
-			Path:        "/api/menu/schedule/playlist-update",
+			ID:          "schedule-get",
+			Name:        "Получить расписание обновлений",
+			Description: "Get playlist and video update timers",
+			Method:      "GET",
+			Path:        "/api/menu/schedule/get",
 		},
 		{
-			ID:          "video-update-time",
-			Name:        "Время обновления видео",
-			Description: "Set video update schedule",
+			ID:          "schedule-update",
+			Name:        "Обновить расписание",
+			Description: "Set playlist and video update timers",
 			Method:      "PUT",
-			Path:        "/api/menu/schedule/video-update",
+			Path:        "/api/menu/schedule/update",
 		},
 		{
 			ID:          "audio-hdmi",
@@ -169,7 +171,7 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -214,7 +216,7 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -290,7 +292,7 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -405,7 +407,7 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -516,9 +518,16 @@ type FileContentRequest struct {
 	Content string `json:"content"`
 }
 
-// TimeScheduleRequest represents a request to update a time schedule.
-type TimeScheduleRequest struct {
-	Time string `json:"time"` // Format: "HH:MM"
+// ScheduleResponse represents the current update schedule.
+type ScheduleResponse struct {
+	Playlist []string `json:"playlist"`
+	Video    []string `json:"video"`
+}
+
+// ScheduleUpdateRequest represents the request to update timers for playlist and video uploads.
+type ScheduleUpdateRequest struct {
+	Playlist []string `json:"playlist"`
+	Video    []string `json:"video"`
 }
 
 // HandleSetRestTime sets the rest time interval using crontab.
@@ -643,9 +652,9 @@ func HandlePlaylistSelect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandlePlaylistUpdateTime updates the playlist update timer configuration.
-func HandlePlaylistUpdateTime(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
+// HandleScheduleGet returns the configured update timers for playlist and video uploads.
+func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
 			ErrMsg: "Метод не разрешён",
@@ -653,48 +662,35 @@ func HandlePlaylistUpdateTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req TimeScheduleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный JSON в теле запроса",
-		})
-		return
-	}
-
-	// Validate time format HH:MM
-	if !isValidTimeFormat(req.Time) {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный формат времени. Используйте HH:MM",
-		})
-		return
-	}
-
-	filePath := PlaylistTimerPath
-	// The timer content is a simple cron-like file; the caller is responsible
-	// for formatting. Here we simply write the provided time into the file
-	// as-is for the service bootstrap.
-	if err := os.WriteFile(filePath, []byte(req.Time), 0644); err != nil {
+	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
+	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err),
+		})
+		return
+	}
+
+	videoTimers, err := readTimerSchedule(VideoTimerPath)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err),
 		})
 		return
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
-		Data: MenuActionResponse{
-			Action:  "playlist-update-time",
-			Result:  "success",
-			Message: "Время обновления плейлиста",
+		Data: ScheduleResponse{
+			Playlist: playlistTimers,
+			Video:    videoTimers,
 		},
 	})
 }
 
-// HandleVideoUpdateTime updates the video update timer configuration.
-func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
+// HandleScheduleUpdate updates the playlist and video timer configurations.
+func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
@@ -703,7 +699,7 @@ func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req TimeScheduleRequest
+	var req ScheduleUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
@@ -712,7 +708,7 @@ func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !isValidTimeFormat(req.Time) {
+	if hasInvalidTimes(req.Playlist, req.Video) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
 			ErrMsg: "Неверный формат времени. Используйте HH:MM",
@@ -720,11 +716,36 @@ func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := VideoTimerPath
-	if err := os.WriteFile(filePath, []byte(req.Time), 0644); err != nil {
+	normalizedPlaylist, err := normalizeTimes(req.Playlist)
+	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err),
+		})
+		return
+	}
+
+	normalizedVideo, err := normalizeTimes(req.Video)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err),
+		})
+		return
+	}
+
+	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err),
+		})
+		return
+	}
+
+	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err),
 		})
 		return
 	}
@@ -732,24 +753,153 @@ func HandleVideoUpdateTime(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
-			Action:  "video-update-time",
+			Action:  "schedule-update",
 			Result:  "success",
-			Message: "Время обновления видео",
+			Message: "Расписание обновлений обновлено",
 		},
 	})
+}
+
+func hasInvalidTimes(lists ...[]string) bool {
+	for _, list := range lists {
+		for _, t := range list {
+			if !isValidTimeFormat(t) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeTimes(times []string) ([]string, error) {
+	normalized := make([]string, 0, len(times))
+	for _, t := range times {
+		hour, minute, err := parseHourMinute(t)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, fmt.Sprintf("%02d:%02d", hour, minute))
+	}
+	return normalized, nil
+}
+
+func parseHourMinute(timeStr string) (int, int, error) {
+	parts := strings.Split(timeStr, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("неверный формат")
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, fmt.Errorf("значение вне диапазона")
+	}
+
+	return hour, minute, nil
+}
+
+func readTimerSchedule(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []string{}, nil
+		}
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	var timers []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "OnCalendar=") {
+			if timeStr, ok := extractTimeFromOnCalendar(line); ok {
+				timers = append(timers, timeStr)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return timers, nil
+}
+
+func extractTimeFromOnCalendar(line string) (string, bool) {
+	value := strings.TrimSpace(strings.TrimPrefix(line, "OnCalendar="))
+	if value == "" {
+		return "", false
+	}
+
+	if strings.HasPrefix(value, "--*") {
+		value = strings.TrimSpace(strings.TrimPrefix(value, "--*"))
+	}
+
+	if value == "" {
+		return "", false
+	}
+
+	fields := strings.Fields(value)
+	if len(fields) > 0 {
+		value = fields[0]
+	}
+
+	parts := strings.Split(value, ":")
+	if len(parts) < 2 {
+		return "", false
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return "", false
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", false
+	}
+
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return "", false
+	}
+
+	return fmt.Sprintf("%02d:%02d", hour, minute), true
+}
+
+func writeTimerSchedule(filePath, description, unit string, times []string) error {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return err
+	}
+
+	var builder strings.Builder
+	builder.WriteString("[Unit]\n")
+	builder.WriteString(fmt.Sprintf("Description = %s\n\n", description))
+	builder.WriteString("[Timer]\n")
+	for _, t := range times {
+		builder.WriteString(fmt.Sprintf("OnCalendar=--* %s:00\n", t))
+	}
+	builder.WriteString(fmt.Sprintf("Unit=%s\n", unit))
+	builder.WriteString("Persistent=true\n")
+	builder.WriteString("User=pi\n\n")
+	builder.WriteString("[Install]\n")
+	builder.WriteString("WantedBy=timers.target\n")
+
+	return os.WriteFile(filePath, []byte(builder.String()), 0644)
 }
 
 // isValidTimeFormat checks if a string is in HH:MM format.
 func isValidTimeFormat(timeStr string) bool {
-	parts := strings.Split(timeStr, ":")
-	if len(parts) != 2 {
-		return false
-	}
-
-	var hour, minute int
-	if _, err := fmt.Sscanf(timeStr, "%d:%d", &hour, &minute); err != nil {
-		return false
-	}
-
-	return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
+	_, _, err := parseHourMinute(timeStr)
+	return err == nil
 }

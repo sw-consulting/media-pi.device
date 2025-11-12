@@ -78,7 +78,10 @@ func TestSighupReloadIntegration(t *testing.T) {
 
 	// Start the agent process with MEDIA_PI_AGENT_CONFIG pointing to our config
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), "MEDIA_PI_AGENT_CONFIG="+cfgPath)
+	cmd.Env = append(os.Environ(),
+		"MEDIA_PI_AGENT_CONFIG="+cfgPath,
+		"MEDIA_PI_AGENT_MOCK_DBUS=1",
+	)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
