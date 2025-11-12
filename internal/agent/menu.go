@@ -814,11 +814,6 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 	}
 
 	firstStop := parsed[0].stop
-	firstEnd := parsed[0].start
-	if firstEnd <= firstStop {
-		firstEnd += day
-	}
-
 	if prevStop != -1 {
 		nextCycleStart := firstStop + day
 		if prevEnd >= nextCycleStart {
