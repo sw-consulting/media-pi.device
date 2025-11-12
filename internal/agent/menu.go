@@ -231,7 +231,17 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := <-ch
+	var result string
+	select {
+	case result = <-ch:
+		// proceed as normal
+	case <-ctx.Done():
+		JSONResponse(w, http.StatusRequestTimeout, APIResponse{
+			OK:     false,
+			ErrMsg: "Таймаут остановки воспроизведения",
+		})
+		return
+	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
