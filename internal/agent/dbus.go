@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	"github.com/coreos/go-systemd/v22/login1"
 )
 
 // DBusConnection represents the subset of systemd D-Bus functionality used by the agent.
@@ -18,6 +19,8 @@ type DBusConnection interface {
 	EnableUnitFilesContext(ctx context.Context, files []string, runtime, force bool) (bool, []dbus.EnableUnitFileChange, error)
 	DisableUnitFilesContext(ctx context.Context, files []string, runtime bool) ([]dbus.DisableUnitFileChange, error)
 	GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error)
+	RebootContext(ctx context.Context) error
+	PowerOffContext(ctx context.Context) error
 }
 
 // DBusConnectionFactory creates a DBusConnection using the provided context.
@@ -32,7 +35,21 @@ func defaultDBusConnectionFactory(ctx context.Context) (DBusConnection, error) {
 	if os.Getenv("MEDIA_PI_AGENT_MOCK_DBUS") == "1" {
 		return &noopDBusConnection{}, nil
 	}
-	return dbus.NewWithContext(ctx)
+	// Create the systemd manager connection
+	sysconn, err := dbus.NewWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a login1 connection for power operations. If this fails, close
+	// the systemd connection and return the error.
+	loginConn, lerr := login1.New()
+	if lerr != nil {
+		sysconn.Close()
+		return nil, lerr
+	}
+
+	return &realDBusConnection{sys: sysconn, login: loginConn}, nil
 }
 
 // SetDBusConnectionFactory overrides the factory used to create D-Bus connections.
@@ -107,4 +124,78 @@ func (n *noopDBusConnection) GetUnitPropertiesContext(ctx context.Context, unit 
 		"ActiveState": "inactive",
 		"SubState":    "dead",
 	}, nil
+}
+
+func (n *noopDBusConnection) RebootContext(ctx context.Context) error {
+	return nil
+}
+
+func (n *noopDBusConnection) PowerOffContext(ctx context.Context) error {
+	return nil
+}
+
+// realDBusConnection is a thin adapter that implements DBusConnection by
+// delegating calls to the underlying systemd dbus connection and the login1
+// connection for power/reboot operations.
+type realDBusConnection struct {
+	sys   *dbus.Conn
+	login *login1.Conn
+}
+
+func (r *realDBusConnection) Close() {
+	if r.login != nil {
+		r.login.Close()
+	}
+	if r.sys != nil {
+		r.sys.Close()
+	}
+}
+
+func (r *realDBusConnection) ReloadContext(ctx context.Context) error {
+	return r.sys.ReloadContext(ctx)
+}
+
+func (r *realDBusConnection) StartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	return r.sys.StartUnitContext(ctx, name, mode, ch)
+}
+
+func (r *realDBusConnection) StopUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	return r.sys.StopUnitContext(ctx, name, mode, ch)
+}
+
+func (r *realDBusConnection) RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	return r.sys.RestartUnitContext(ctx, name, mode, ch)
+}
+
+func (r *realDBusConnection) EnableUnitFilesContext(ctx context.Context, files []string, runtime, force bool) (bool, []dbus.EnableUnitFileChange, error) {
+	return r.sys.EnableUnitFilesContext(ctx, files, runtime, force)
+}
+
+func (r *realDBusConnection) DisableUnitFilesContext(ctx context.Context, files []string, runtime bool) ([]dbus.DisableUnitFileChange, error) {
+	return r.sys.DisableUnitFilesContext(ctx, files, runtime)
+}
+
+func (r *realDBusConnection) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
+	return r.sys.GetUnitPropertiesContext(ctx, unit)
+}
+
+// RebootContext delegates to login1.Conn.Reboot. login1's API does not
+// accept a context, so we call it directly. The askForAuth flag is set to
+// false to match the previous behavior of calling reboot without prompting.
+func (r *realDBusConnection) RebootContext(ctx context.Context) error {
+	if r.login == nil {
+		return nil
+	}
+	// login1.Conn only exposes non-context methods; call directly.
+	r.login.Reboot(false)
+	return nil
+}
+
+// PowerOffContext delegates to login1.Conn.PowerOff.
+func (r *realDBusConnection) PowerOffContext(ctx context.Context) error {
+	if r.login == nil {
+		return nil
+	}
+	r.login.PowerOff(false)
+	return nil
 }
