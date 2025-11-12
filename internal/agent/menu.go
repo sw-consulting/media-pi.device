@@ -131,7 +131,7 @@ func GetMenuActions() []MenuAction {
 		{
 			ID:          "schedule-get",
 			Name:        "Получить расписание обновлений",
-			Description: "Get playlist and video update timers",
+			Description: "Получить расписание обновления плейлистов и видео",
 			Method:      "GET",
 			Path:        "/api/menu/schedule/get",
 		},
