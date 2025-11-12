@@ -375,8 +375,11 @@ func readPlaylistUploadConfig(path string) (PlaylistUploadConfig, error) {
 			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит '='")
 		}
 
-		command := strings.TrimSpace(line[eqIdx+1:])
-		fields := strings.Fields(command)
+		commandWithComment := strings.TrimSpace(line[eqIdx+1:])
+		if hashIdx := strings.Index(commandWithComment, "#"); hashIdx != -1 {
+			commandWithComment = strings.TrimSpace(commandWithComment[:hashIdx])
+		}
+		fields := strings.Fields(commandWithComment)
 		if len(fields) < 2 {
 			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
 		}
@@ -417,8 +420,13 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 			return fmt.Errorf("строка ExecStart не содержит '='")
 		}
 
-		command := strings.TrimSpace(line[eqIdx+1:])
-		fields := strings.Fields(command)
+		commandWithComment := strings.TrimSpace(line[eqIdx+1:])
+		comment := ""
+		if hashIdx := strings.Index(commandWithComment, "#"); hashIdx != -1 {
+			comment = strings.TrimSpace(commandWithComment[hashIdx:])
+			commandWithComment = strings.TrimSpace(commandWithComment[:hashIdx])
+		}
+		fields := strings.Fields(commandWithComment)
 		if len(fields) < 2 {
 			return fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
 		}
@@ -427,6 +435,9 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 		prefixFields = append(prefixFields, source, destination)
 
 		newCommand := strings.Join(prefixFields, " ")
+		if comment != "" {
+			newCommand = fmt.Sprintf("%s %s", newCommand, comment)
+		}
 		lhs := strings.TrimSpace(line[:eqIdx])
 		lines[i] = fmt.Sprintf("%s = %s", lhs, newCommand)
 		updated = true

@@ -247,7 +247,7 @@ func TestHandlePlaylistGet(t *testing.T) {
 	content := `[Unit]
 Description = Rsync playlist upload service
 [Service]
-ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/
+ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
 [Install]
 WantedBy = multi-user.target
 `
@@ -301,7 +301,7 @@ func TestHandlePlaylistUpdate(t *testing.T) {
 	content := `[Unit]
 Description = Rsync playlist upload service
 [Service]
-ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/
+ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
 ExecStartPost = /home/pi/videoplay.sh
 [Install]
 WantedBy = multi-user.target
@@ -327,8 +327,12 @@ WantedBy = multi-user.target
 		t.Fatalf("failed to read updated service file: %v", err)
 	}
 
-	if !strings.Contains(string(updated), "ExecStart = /usr/bin/rsync -czavP /mnt/ya.disk/playlist/test/ /mnt/usb/playlist/") {
+	if !strings.Contains(string(updated), "ExecStart = /usr/bin/rsync -czavP /mnt/ya.disk/playlist/test/ /mnt/usb/playlist/ # nightly sync") {
 		t.Fatalf("updated service file does not contain new paths:\n%s", string(updated))
+	}
+
+	if !strings.Contains(string(updated), "# nightly sync") {
+		t.Fatalf("updated service file lost inline comment:\n%s", string(updated))
 	}
 }
 
