@@ -802,7 +802,7 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 		}
 
 		if timelineStop <= prevEnd {
-			return errors.New("конец интервала отдыха должен предшествовать началу следующего интервала")
+			return errors.New("интервалы отдыха не должны пересекаться")
 		}
 
 		for timelineEnd <= timelineStop {
