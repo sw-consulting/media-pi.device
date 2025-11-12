@@ -291,7 +291,7 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 	case result = <-ch:
 		// Successfully received result from D-Bus
 	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{
+		JSONResponse(w, http.StatusRequestTimeout, APIResponse{
 			OK:     false,
 			ErrMsg: "Таймаут запуска воспроизведения",
 		})
