@@ -100,28 +100,28 @@ sudo systemctl status media-pi-agent
 - `GET /api/menu/storage/check` — проверка яндекс диска
 - `POST /api/menu/playlist/upload` — загрузка плейлиста
 - `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
-- `PUT /api/menu/schedule/rest-time` — задать время отдыха (crontab)
-- `GET /api/menu/schedule/get` — получить расписание обновления плейлиста и видео
-- `PUT /api/menu/schedule/update` — обновить расписание плейлиста и видео
+- `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
+- `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
 - `POST /api/menu/audio/hdmi` — настройка HDMI аудио
 - `POST /api/menu/audio/jack` — настройка 3.5mm Jack аудио
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)
 - `POST /api/menu/system/reboot` — перезагрузка системы
 - `POST /api/menu/system/shutdown` — выключение системы
 
-`PUT /api/menu/schedule/rest-time` принимает JSON c массивом интервалов отдыха:
+`PUT /api/menu/schedule/update` принимает JSON с массивами расписаний обновления и отдыха:
 
 ```
 {
-  "times": [
+  "playlist": ["06:05", "16:28"],
+  "video": ["22:22"],
+  "rest": [
     {"stop": "18:30", "start": "09:00"},
     {"stop": "23:45", "start": "22:15"}
   ]
 }
 ```
 
-Для обратной совместимости поддерживаются поля `stop_time` и `start_time`, которые
-задают одиночный интервал. Пустой массив `times` удаляет все интервалы.
+Поле `rest` опционально: если передать пустой массив, интервалы отдыха будут удалены.
 
 `GET /api/menu/schedule/get` возвращает дополнительное поле `rest` с массивом
 интервалов, считанных из пользовательского crontab.

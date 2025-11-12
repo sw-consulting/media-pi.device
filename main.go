@@ -75,7 +75,6 @@ func main() {
 	mux.HandleFunc("/api/menu/storage/check", agent.AuthMiddleware(agent.HandleStorageCheck))
 	mux.HandleFunc("/api/menu/playlist/upload", agent.AuthMiddleware(agent.HandlePlaylistUpload))
 	mux.HandleFunc("/api/menu/playlist/select", agent.AuthMiddleware(agent.HandlePlaylistSelect))
-	mux.HandleFunc("/api/menu/schedule/rest-time", agent.AuthMiddleware(agent.HandleSetRestTime))
 	mux.HandleFunc("/api/menu/schedule/get", agent.AuthMiddleware(agent.HandleScheduleGet))
 	mux.HandleFunc("/api/menu/schedule/update", agent.AuthMiddleware(agent.HandleScheduleUpdate))
 	mux.HandleFunc("/api/menu/audio/hdmi", agent.AuthMiddleware(agent.HandleAudioHDMI))
