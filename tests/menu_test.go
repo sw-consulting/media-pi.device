@@ -99,8 +99,8 @@ func TestGetMenuActions(t *testing.T) {
 		"playlist-select",
 		"schedule-get",
 		"schedule-update",
-		"audio-hdmi",
-		"audio-jack",
+		"audio-get",
+		"audio-update",
 		"system-reload",
 		"system-reboot",
 		"system-shutdown",
@@ -191,31 +191,108 @@ func TestHandlePlaylistUploadMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandleAudioHDMIMethodNotAllowed(t *testing.T) {
+func TestHandleAudioGetMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/hdmi", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/audio/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleAudioHDMI(w, req)
+	agent.HandleAudioGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
-func TestHandleAudioJackMethodNotAllowed(t *testing.T) {
+func TestHandleAudioUpdateMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/jack", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleAudioJack(w, req)
+	agent.HandleAudioUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleAudioGetAndUpdate(t *testing.T) {
+	agent.ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	cfg := filepath.Join(tmp, "asound.conf")
+
+	original := agent.AudioConfigPath
+	agent.AudioConfigPath = cfg
+	t.Cleanup(func() { agent.AudioConfigPath = original })
+
+	// Initially file does not exist -> unknown
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+	agent.HandleAudioGet(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp agent.APIResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data != "unknown" {
+		t.Fatalf("expected unknown, got %#v", resp.Data)
+	}
+
+	// Update to hdmi
+	body := strings.NewReader(`{"output":"hdmi"}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w = httptest.NewRecorder()
+	agent.HandleAudioUpdate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d", w.Code)
+	}
+
+	// Verify get returns hdmi
+	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w = httptest.NewRecorder()
+	agent.HandleAudioGet(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data != "hdmi" {
+		t.Fatalf("expected hdmi, got %#v", resp.Data)
+	}
+
+	// Update to jack
+	body = strings.NewReader(`{"output":"jack"}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w = httptest.NewRecorder()
+	agent.HandleAudioUpdate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d", w.Code)
+	}
+
+	// Verify get returns jack
+	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w = httptest.NewRecorder()
+	agent.HandleAudioGet(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Data != "jack" {
+		t.Fatalf("expected jack, got %#v", resp.Data)
 	}
 }
 

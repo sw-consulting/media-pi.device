@@ -81,21 +81,6 @@ sudo systemctl status media-pi-agent
 
 ## API Endpoints
 
-### System Endpoints
-
-- `GET /health` — проверка состояния (без авторизации)
-- `GET /api/units` — список всех разрешённых юнитов
-- `GET /api/units/status?unit=<name>` — статус юнита
-- `POST /api/units/start` — запуск юнита
-- `POST /api/units/stop` — остановка юнита  
-- `POST /api/units/restart` — перезапуск юнита
-- `POST /api/units/enable` — включение юнита
-- `POST /api/units/disable` — отключение юнита
-
-### Menu Endpoints
-
-- `GET /api/menu` — список доступных действий меню
-- `POST /api/menu/playback/stop` — остановить воспроизведение
 - `POST /api/menu/playback/start` — запустить воспроизведение
 - `GET /api/menu/storage/check` — проверка яндекс диска
 - `POST /api/menu/playlist/upload` — загрузка плейлиста

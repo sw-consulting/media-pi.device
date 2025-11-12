@@ -28,6 +28,34 @@ var (
 	VideoTimerPath    = "/etc/systemd/system/video.upload.timer"
 )
 
+// AudioConfigPath is the path to the ALSA config file controlling audio output.
+// Tests may override this to point to a temp file.
+var AudioConfigPath = "/etc/asound.conf"
+
+// RebootAction and PowerOffAction are package-level hooks used to perform
+// system reboot and power-off. Tests can replace these with stubs to avoid
+// interacting with the real system.
+var (
+	RebootAction   = realReboot
+	PowerOffAction = realPowerOff
+)
+
+// realReboot performs a reboot via systemd's D-Bus API (org.freedesktop.login1.Manager.Reboot).
+func realReboot() error {
+	// Fallback to invoking systemctl reboot. Tests should override RebootAction
+	// to avoid actually rebooting the test host.
+	cmd := exec.Command("systemctl", "reboot")
+	return cmd.Run()
+}
+
+// realPowerOff performs a power-off via systemd's D-Bus API (org.freedesktop.login1.Manager.PowerOff).
+func realPowerOff() error {
+	// Fallback to invoking systemctl poweroff. Tests should override PowerOffAction
+	// to avoid actually powering off the test host.
+	cmd := exec.Command("systemctl", "poweroff")
+	return cmd.Run()
+}
+
 const (
 	restStopMarker   = "# MEDIA_PI_REST STOP"
 	restStartMarker  = "# MEDIA_PI_REST START"
@@ -68,35 +96,35 @@ func GetMenuActions() []MenuAction {
 		{
 			ID:          "playback-stop",
 			Name:        "Остановить воспроизведение",
-			Description: "Stop video playback service",
+			Description: "Остановить сервис воспроизведения видео",
 			Method:      "POST",
 			Path:        "/api/menu/playback/stop",
 		},
 		{
 			ID:          "playback-start",
 			Name:        "Запустить воспроизведение",
-			Description: "Start video playback service",
+			Description: "Запустить сервис воспроизведения видео",
 			Method:      "POST",
 			Path:        "/api/menu/playback/start",
 		},
 		{
 			ID:          "storage-check",
 			Name:        "Проверка яндекс диска",
-			Description: "Check Yandex disk mount status",
+			Description: "Проверить статус Яндекс.Диска",
 			Method:      "GET",
 			Path:        "/api/menu/storage/check",
 		},
 		{
 			ID:          "playlist-upload",
 			Name:        "Загрузка плейлиста",
-			Description: "Upload playlist from remote source",
+			Description: "Загрузить плейлист из удалённого источника",
 			Method:      "POST",
 			Path:        "/api/menu/playlist/upload",
 		},
 		{
 			ID:          "playlist-select",
 			Name:        "Выбор плейлиста",
-			Description: "Update playlist upload service configuration",
+			Description: "Обновить конфигурацию сервиса загрузки плейлистов",
 			Method:      "PUT",
 			Path:        "/api/menu/playlist/select",
 		},
@@ -110,42 +138,42 @@ func GetMenuActions() []MenuAction {
 		{
 			ID:          "schedule-update",
 			Name:        "Обновить расписание",
-			Description: "Set playlist and video update timers",
+			Description: "Установить расписание обновления плейлистов и видео",
 			Method:      "PUT",
 			Path:        "/api/menu/schedule/update",
 		},
 		{
-			ID:          "audio-hdmi",
-			Name:        "HDMI Audio",
-			Description: "Configure HDMI audio output",
-			Method:      "POST",
-			Path:        "/api/menu/audio/hdmi",
+			ID:          "audio-get",
+			Name:        "Получить аудио-вывод",
+			Description: "Получить текущую настройку вывода звука (hdmi|jack)",
+			Method:      "GET",
+			Path:        "/api/menu/audio/get",
 		},
 		{
-			ID:          "audio-jack",
-			Name:        "3.5 Jack Audio",
-			Description: "Configure 3.5mm jack audio output",
-			Method:      "POST",
-			Path:        "/api/menu/audio/jack",
+			ID:          "audio-update",
+			Name:        "Обновить аудио-вывод",
+			Description: "Установить вывод звука (hdmi|jack)",
+			Method:      "PUT",
+			Path:        "/api/menu/audio/update",
 		},
 		{
 			ID:          "system-reload",
 			Name:        "Применить изменения",
-			Description: "Reload systemd daemon configuration",
+			Description: "Перезагрузить конфигурацию systemd",
 			Method:      "POST",
 			Path:        "/api/menu/system/reload",
 		},
 		{
 			ID:          "system-reboot",
 			Name:        "Перезагрузка",
-			Description: "Reboot the system",
+			Description: "Перезагрузить систему",
 			Method:      "POST",
 			Path:        "/api/menu/system/reboot",
 		},
 		{
 			ID:          "system-shutdown",
 			Name:        "Выключение",
-			Description: "Shutdown the system",
+			Description: "Остановить систему",
 			Method:      "POST",
 			Path:        "/api/menu/system/shutdown",
 		},
@@ -336,64 +364,73 @@ func HandlePlaylistUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleAudioHDMI configures HDMI audio output.
-func HandleAudioHDMI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
+// (removed deprecated handlers: audio-hdmi and audio-jack)
 
-	config := "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
-
-	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось настроить HDMI аудио: %v", err),
-		})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "audio-hdmi",
-			Result:  "success",
-			Message: "HDMI",
-		},
-	})
+// AudioUpdateRequest represents {"output":"hdmi"|"jack"}
+type AudioUpdateRequest struct {
+	Output string `json:"output"`
 }
 
-// HandleAudioJack configures 3.5mm jack audio output.
-func HandleAudioJack(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+// HandleAudioGet reads the `AudioConfigPath` file and returns the current
+// output: "hdmi", "jack" or "unknown".
+func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
 	}
 
-	config := "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
-
-	if err := os.WriteFile("/etc/asound.conf", []byte(config), 0644); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось настроить 3.5 Jack аудио: %v", err),
-		})
+	data, err := os.ReadFile(AudioConfigPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "unknown"})
+			return
+		}
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфиг: %v", err)})
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "audio-jack",
-			Result:  "success",
-			Message: "3.5 Jack",
-		},
-	})
+	content := string(data)
+	if strings.Contains(content, "card 0") {
+		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "hdmi"})
+		return
+	}
+	if strings.Contains(content, "card 1") {
+		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "jack"})
+		return
+	}
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "unknown"})
+}
+
+// HandleAudioUpdate sets the audio output by writing `AudioConfigPath`.
+func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	var req AudioUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON"})
+		return
+	}
+
+	var config string
+	switch strings.ToLower(strings.TrimSpace(req.Output)) {
+	case "hdmi":
+		config = "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
+	case "jack":
+		config = "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
+	default:
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "output must be 'hdmi' or 'jack'"})
+		return
+	}
+
+	if err := os.WriteFile(AudioConfigPath, []byte(config), 0644); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать конфиг: %v", err)})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "audio-update", Result: "success", Message: req.Output}})
 }
 
 // HandleSystemReload reloads systemd daemon configuration.
@@ -465,10 +502,13 @@ func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Failed to encode JSON response: %v\n", err)
 	}
 
-	// Execute reboot in a goroutine to allow response to be sent
+	// Execute reboot in a goroutine to allow response to be sent. Use the
+	// RebootAction hook so tests can override it and so we use the D-Bus
+	// implementation by default.
 	go func() {
-		cmd := exec.Command("sudo", "reboot", "now")
-		_ = cmd.Run()
+		if err := RebootAction(); err != nil {
+			fmt.Printf("Reboot action failed: %v\n", err)
+		}
 	}()
 }
 
@@ -499,10 +539,13 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Failed to encode JSON response: %v\n", err)
 	}
 
-	// Execute shutdown in a goroutine to allow response to be sent
+	// Execute shutdown in a goroutine to allow response to be sent. Use the
+	// PowerOffAction hook so tests can override it and so we use the D-Bus
+	// implementation by default.
 	go func() {
-		cmd := exec.Command("sudo", "shutdown", "now")
-		_ = cmd.Run()
+		if err := PowerOffAction(); err != nil {
+			fmt.Printf("PowerOff action failed: %v\n", err)
+		}
 	}()
 }
 
