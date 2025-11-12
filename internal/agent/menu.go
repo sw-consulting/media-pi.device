@@ -817,7 +817,9 @@ func readTimerSchedule(filePath string) ([]string, error) {
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	var timers []string
 	scanner := bufio.NewScanner(file)
