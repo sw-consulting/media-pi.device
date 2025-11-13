@@ -81,12 +81,13 @@ sudo systemctl status media-pi-agent
 
 ## API Endpoints
 
-- `POST /api/menu/playback/start` — запустить воспроизведение
 - `POST /api/menu/playback/stop` — остановить воспроизведение
-- `GET /api/menu/storage/check` — проверка яндекс диска
+- `POST /api/menu/playback/start` — запустить воспроизведение
+- `GET /api/menu/storage/check` — проверка Яндекс.Диска
 - `GET /api/menu/playlist/get` — получение настроек сервиса загрузки плейлистов
 - `PUT /api/menu/playlist/update` — обновление настроек сервиса загрузки плейлистов
-- `PUT /api/menu/playlist/select` — выбор плейлиста (обновление конфигурации)
+- `POST /api/menu/playlist/start-upload` — начать загрузку плейлиста (запустить `playlist.upload.service`)
+- `POST /api/menu/playlist/stop-upload` — остановить загрузку плейлиста (остановить `playlist.upload.service`)
 - `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
 - `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
 - `GET /api/menu/audio/get` — получить текущие настройки аудио
@@ -95,7 +96,7 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/system/reboot` — перезагрузка системы
 - `POST /api/menu/system/shutdown` — выключение системы
 
-`PUT /api/menu/schedule/update` принимает JSON с массивами расписаний обновления и отдыха:
+`PUT /api/menu/schedule/update` принимает JSON с массивами расписаний обновления и нерабочих интервалов:
 
 ```
 {
