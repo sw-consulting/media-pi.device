@@ -1,9 +1,9 @@
-//go:build integration && !windows
+//go:build test && !windows
 
 // Copyright (c) 2025 sw.consulting
 // This file is a part of Media Pi device agent
 
-package integration
+package test
 
 import (
 	"bufio"
