@@ -1,4 +1,4 @@
-package tests
+package agent
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/coreos/go-systemd/v22/dbus"
-	agent "github.com/sw-consulting/media-pi.device/internal/agent"
 )
 
 // fakeConn implements agent.DBusConnection for tests. Only ReloadContext is
@@ -43,16 +42,16 @@ func TestHandleSystemReload_UsesInjectedDBusFactory(t *testing.T) {
 	fake := &fakeConn{}
 
 	// Inject factory that returns our fake connection
-	agent.SetDBusConnectionFactory(func(ctx context.Context) (agent.DBusConnection, error) {
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
 		return fake, nil
 	})
 	// restore default factory after test
-	defer agent.SetDBusConnectionFactory(nil)
+	defer SetDBusConnectionFactory(nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
 	rr := httptest.NewRecorder()
 
-	agent.HandleSystemReload(rr, req)
+	HandleSystemReload(rr, req)
 
 	if rr.Result().StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200 OK, got %d", rr.Result().StatusCode)

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 sw.consulting
 // This file is a part of Media Pi device agent
 
-package tests
+package agent
 
 import (
 	"encoding/json"
@@ -12,24 +12,22 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/sw-consulting/media-pi.device/internal/agent"
 )
 
 func TestHandleMenuList(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleMenuList(w, req)
+	HandleMenuList(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var resp agent.APIResponse
+	var resp APIResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -70,13 +68,13 @@ func TestHandleMenuList(t *testing.T) {
 }
 
 func TestHandleMenuListMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleMenuList(w, req)
+	HandleMenuList(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -84,7 +82,7 @@ func TestHandleMenuListMethodNotAllowed(t *testing.T) {
 }
 
 func TestGetMenuActions(t *testing.T) {
-	actions := agent.GetMenuActions()
+	actions := GetMenuActions()
 
 	if len(actions) == 0 {
 		t.Fatal("expected menu actions to be non-empty")
@@ -138,13 +136,13 @@ func TestGetMenuActions(t *testing.T) {
 }
 
 func TestHandlePlaybackStopMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/playback/stop", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaybackStop(w, req)
+	HandlePlaybackStop(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -152,13 +150,13 @@ func TestHandlePlaybackStopMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePlaybackStartMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/playback/start", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaybackStart(w, req)
+	HandlePlaybackStart(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -166,13 +164,13 @@ func TestHandlePlaybackStartMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleStorageCheckMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/storage/check", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleStorageCheck(w, req)
+	HandleStorageCheck(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -180,13 +178,13 @@ func TestHandleStorageCheckMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePlaylistGetMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/playlist/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistGet(w, req)
+	HandlePlaylistGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -194,13 +192,13 @@ func TestHandlePlaylistGetMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePlaylistUpdateMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistUpdate(w, req)
+	HandlePlaylistUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -208,13 +206,13 @@ func TestHandlePlaylistUpdateMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleAudioGetMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/audio/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleAudioGet(w, req)
+	HandleAudioGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -222,13 +220,13 @@ func TestHandleAudioGetMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleAudioUpdateMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleAudioUpdate(w, req)
+	HandleAudioUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -236,14 +234,14 @@ func TestHandleAudioUpdateMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePlaylistGet(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	servicePath := filepath.Join(tmp, "playlist.upload.service")
 
-	originalServicePath := agent.PlaylistServicePath
-	agent.PlaylistServicePath = servicePath
-	t.Cleanup(func() { agent.PlaylistServicePath = originalServicePath })
+	originalServicePath := PlaylistServicePath
+	PlaylistServicePath = servicePath
+	t.Cleanup(func() { PlaylistServicePath = originalServicePath })
 
 	content := `[Unit]
 Description = Rsync playlist upload service
@@ -261,13 +259,13 @@ WantedBy = multi-user.target
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistGet(w, req)
+	HandlePlaylistGet(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	var resp agent.APIResponse
+	var resp APIResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -290,14 +288,14 @@ WantedBy = multi-user.target
 }
 
 func TestHandlePlaylistUpdate(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	servicePath := filepath.Join(tmp, "playlist.upload.service")
 
-	originalServicePath := agent.PlaylistServicePath
-	agent.PlaylistServicePath = servicePath
-	t.Cleanup(func() { agent.PlaylistServicePath = originalServicePath })
+	originalServicePath := PlaylistServicePath
+	PlaylistServicePath = servicePath
+	t.Cleanup(func() { PlaylistServicePath = originalServicePath })
 
 	content := `[Unit]
 Description = Rsync playlist upload service
@@ -317,7 +315,7 @@ WantedBy = multi-user.target
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandlePlaylistUpdate(w, req)
+	HandlePlaylistUpdate(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
@@ -338,24 +336,24 @@ WantedBy = multi-user.target
 }
 
 func TestHandleAudioGetAndUpdate(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	cfg := filepath.Join(tmp, "asound.conf")
 
-	original := agent.AudioConfigPath
-	agent.AudioConfigPath = cfg
-	t.Cleanup(func() { agent.AudioConfigPath = original })
+	original := AudioConfigPath
+	AudioConfigPath = cfg
+	t.Cleanup(func() { AudioConfigPath = original })
 
 	// Initially file does not exist -> unknown
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	agent.HandleAudioGet(w, req)
+	HandleAudioGet(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var resp agent.APIResponse
+	var resp APIResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -368,7 +366,7 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w = httptest.NewRecorder()
-	agent.HandleAudioUpdate(w, req)
+	HandleAudioUpdate(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 on update, got %d", w.Code)
 	}
@@ -377,7 +375,7 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w = httptest.NewRecorder()
-	agent.HandleAudioGet(w, req)
+	HandleAudioGet(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
@@ -393,7 +391,7 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w = httptest.NewRecorder()
-	agent.HandleAudioUpdate(w, req)
+	HandleAudioUpdate(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 on update, got %d", w.Code)
 	}
@@ -402,7 +400,7 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w = httptest.NewRecorder()
-	agent.HandleAudioGet(w, req)
+	HandleAudioGet(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
@@ -415,13 +413,13 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 }
 
 func TestHandleSystemReloadMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/system/reload", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleSystemReload(w, req)
+	HandleSystemReload(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -429,13 +427,13 @@ func TestHandleSystemReloadMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleSystemRebootMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/system/reboot", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleSystemReboot(w, req)
+	HandleSystemReboot(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -443,13 +441,13 @@ func TestHandleSystemRebootMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/system/shutdown", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleSystemShutdown(w, req)
+	HandleSystemShutdown(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -457,13 +455,13 @@ func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	// start-upload expects POST
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/start-upload", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	agent.HandlePlaylistStartUpload(w, req)
+	HandlePlaylistStartUpload(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405 for start-upload, got %d", w.Code)
 	}
@@ -472,20 +470,20 @@ func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/stop-upload", nil)
 	req2.Header.Set("Authorization", "Bearer test-key")
 	w2 := httptest.NewRecorder()
-	agent.HandlePlaylistStopUpload(w2, req2)
+	HandlePlaylistStopUpload(w2, req2)
 	if w2.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405 for stop-upload, got %d", w2.Code)
 	}
 }
 
 func TestHandleScheduleGetMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/schedule/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleGet(w, req)
+	HandleScheduleGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -493,13 +491,13 @@ func TestHandleScheduleGetMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleScheduleUpdateMethodNotAllowed(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleUpdate(w, req)
+	HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -507,27 +505,27 @@ func TestHandleScheduleUpdateMethodNotAllowed(t *testing.T) {
 }
 
 func TestHandleScheduleGetReturnsTimers(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
-	originalCrontabRead := agent.CrontabReadFunc
-	agent.CrontabReadFunc = func() (string, error) {
+	originalCrontabRead := CrontabReadFunc
+	CrontabReadFunc = func() (string, error) {
 		return "", nil
 	}
 	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalCrontabRead
+		CrontabReadFunc = originalCrontabRead
 	})
 
 	playlistContent := ` [Unit]
@@ -561,15 +559,15 @@ WantedBy=timers.target
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleGet(w, req)
+	HandleScheduleGet(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
 	var resp struct {
-		OK   bool                   `json:"ok"`
-		Data agent.ScheduleResponse `json:"data"`
+		OK   bool             `json:"ok"`
+		Data ScheduleResponse `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
@@ -595,19 +593,19 @@ WantedBy=timers.target
 }
 
 func TestHandleScheduleGetIncludesRestTimes(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
 	playlistContent := ` [Unit]
@@ -636,8 +634,8 @@ WantedBy=timers.target
 		t.Fatalf("failed to write video timer: %v", err)
 	}
 
-	originalCrontabRead := agent.CrontabReadFunc
-	agent.CrontabReadFunc = func() (string, error) {
+	originalCrontabRead := CrontabReadFunc
+	CrontabReadFunc = func() (string, error) {
 		return strings.Join([]string{
 			"# MEDIA_PI_REST STOP",
 			"30 18 * * * sudo systemctl stop play.video.service",
@@ -646,22 +644,22 @@ WantedBy=timers.target
 		}, "\n") + "\n", nil
 	}
 	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalCrontabRead
+		CrontabReadFunc = originalCrontabRead
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleGet(w, req)
+	HandleScheduleGet(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
 	var resp struct {
-		OK   bool                   `json:"ok"`
-		Data agent.ScheduleResponse `json:"data"`
+		OK   bool             `json:"ok"`
+		Data ScheduleResponse `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
@@ -671,33 +669,33 @@ WantedBy=timers.target
 		t.Fatalf("expected ok response")
 	}
 
-	expectedRest := []agent.RestTimePair{{Stop: "18:30", Start: "09:00"}}
+	expectedRest := []RestTimePair{{Stop: "18:30", Start: "09:00"}}
 	if !reflect.DeepEqual(expectedRest, resp.Data.Rest) {
 		t.Fatalf("unexpected rest schedule: %#v", resp.Data.Rest)
 	}
 }
 
 func TestHandleScheduleUpdateValidation(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(`{"playlist":["25:00"],"video":["08:00"]}`))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleUpdate(w, req)
+	HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -705,26 +703,26 @@ func TestHandleScheduleUpdateValidation(t *testing.T) {
 }
 
 func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
-	originalRead := agent.CrontabReadFunc
-	originalWrite := agent.CrontabWriteFunc
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
 	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalRead
-		agent.CrontabWriteFunc = originalWrite
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
 	})
 
 	existing := strings.Join([]string{
@@ -735,7 +733,7 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 		"45 21 * * * sudo systemctl start play.video.service",
 	}, "\n") + "\n"
 
-	agent.CrontabReadFunc = func() (string, error) {
+	CrontabReadFunc = func() (string, error) {
 		return existing, nil
 	}
 
@@ -743,7 +741,7 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 		writeCalled bool
 		writtenCron string
 	)
-	agent.CrontabWriteFunc = func(content string) error {
+	CrontabWriteFunc = func(content string) error {
 		writeCalled = true
 		writtenCron = content
 		return nil
@@ -754,7 +752,7 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleUpdate(w, req)
+	HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -808,26 +806,26 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 }
 
 func TestHandleScheduleUpdateClearsRest(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
-	originalRead := agent.CrontabReadFunc
-	originalWrite := agent.CrontabWriteFunc
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
 	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalRead
-		agent.CrontabWriteFunc = originalWrite
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
 	})
 
 	existing := strings.Join([]string{
@@ -837,7 +835,7 @@ func TestHandleScheduleUpdateClearsRest(t *testing.T) {
 		"45 21 * * * sudo systemctl start play.video.service",
 	}, "\n") + "\n"
 
-	agent.CrontabReadFunc = func() (string, error) {
+	CrontabReadFunc = func() (string, error) {
 		return existing, nil
 	}
 
@@ -845,7 +843,7 @@ func TestHandleScheduleUpdateClearsRest(t *testing.T) {
 		writeCalled bool
 		writtenCron string
 	)
-	agent.CrontabWriteFunc = func(content string) error {
+	CrontabWriteFunc = func(content string) error {
 		writeCalled = true
 		writtenCron = content
 		return nil
@@ -856,7 +854,7 @@ func TestHandleScheduleUpdateClearsRest(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleUpdate(w, req)
+	HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -872,34 +870,34 @@ func TestHandleScheduleUpdateClearsRest(t *testing.T) {
 }
 
 func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
-	agent.ServerKey = "test-key"
+	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 
-	originalPlaylist := agent.PlaylistTimerPath
-	originalVideo := agent.VideoTimerPath
-	agent.PlaylistTimerPath = playlistTimer
-	agent.VideoTimerPath = videoTimer
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
 	t.Cleanup(func() {
-		agent.PlaylistTimerPath = originalPlaylist
-		agent.VideoTimerPath = originalVideo
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
 	})
 
-	originalRead := agent.CrontabReadFunc
-	originalWrite := agent.CrontabWriteFunc
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
 	t.Cleanup(func() {
-		agent.CrontabReadFunc = originalRead
-		agent.CrontabWriteFunc = originalWrite
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
 	})
 
-	agent.CrontabReadFunc = func() (string, error) {
+	CrontabReadFunc = func() (string, error) {
 		return "", nil
 	}
 
 	writeCalled := false
-	agent.CrontabWriteFunc = func(string) error {
+	CrontabWriteFunc = func(string) error {
 		writeCalled = true
 		return nil
 	}
@@ -909,7 +907,7 @@ func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	agent.HandleScheduleUpdate(w, req)
+	HandleScheduleUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -921,7 +919,7 @@ func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
 }
 
 func TestGetMenuActionsIncludesNewActions(t *testing.T) {
-	actions := agent.GetMenuActions()
+	actions := GetMenuActions()
 
 	expectedIDs := []string{
 		"playlist-get",
@@ -1019,7 +1017,7 @@ func TestSanitizeSystemdValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.SanitizeSystemdValue(tt.input)
+			result := SanitizeSystemdValue(tt.input)
 			if result != tt.expected {
 				t.Errorf("SanitizeSystemdValue(%q) = %q, want %q", tt.input, result, tt.expected)
 			}

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 sw.consulting
 // This file is a part of Media Pi device agent
-package tests
+package agent
 
 import (
 	"net/http"
@@ -8,13 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/sw-consulting/media-pi.device/internal/agent"
 )
 
 func TestReloadConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	p := filepath.Join(tmpDir, "agent.yaml")
+	p := filepath.Join(tmpDir, "yaml")
 
 	yamlData := `allowed_units:
   - reload.service
@@ -26,14 +24,14 @@ listen_addr: "0.0.0.0:8081"
 	}
 
 	// Load initial config through LoadConfigFrom via ConfigPath+Reload
-	agent.ConfigPath = p
-	if err := agent.ReloadConfig(); err != nil {
+	ConfigPath = p
+	if err := ReloadConfig(); err != nil {
 		t.Fatalf("ReloadConfig failed: %v", err)
 	}
-	if agent.ServerKey != "reload-key-xyz" {
-		t.Fatalf("expected server key to be reloaded, got %q", agent.ServerKey)
+	if ServerKey != "reload-key-xyz" {
+		t.Fatalf("expected server key to be reloaded, got %q", ServerKey)
 	}
-	if _, ok := agent.AllowedUnits["reload.service"]; !ok {
+	if _, ok := AllowedUnits["reload.service"]; !ok {
 		t.Fatalf("expected allowed unit reload.service after reload")
 	}
 }
@@ -41,7 +39,7 @@ listen_addr: "0.0.0.0:8081"
 func TestInternalReloadHandler(t *testing.T) {
 	// prepare config
 	tmpDir := t.TempDir()
-	p := filepath.Join(tmpDir, "agent.yaml")
+	p := filepath.Join(tmpDir, "yaml")
 	yamlData := `allowed_units:
   - handler.service
 server_key: "handler-key-123"
@@ -52,11 +50,11 @@ listen_addr: "0.0.0.0:8081"
 	}
 
 	// set config path and initial fake key
-	agent.ConfigPath = p
-	agent.ServerKey = "handler-key-123"
+	ConfigPath = p
+	ServerKey = "handler-key-123"
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/internal/reload", agent.AuthMiddleware(agent.HandleReload))
+	mux.HandleFunc("/internal/reload", AuthMiddleware(HandleReload))
 
 	// call handler without auth
 	req := httptest.NewRequest("POST", "/internal/reload", nil)
