@@ -81,14 +81,20 @@ sudo systemctl status media-pi-agent
 
 ## API Endpoints
 
-- `GET /health` — проверка состояния (без авторизации)
-- `GET /api/units` — список всех разрешённых юнитов
-- `GET /api/units/status?unit=<name>` — статус юнита
-- `POST /api/units/start` — запуск юнита
-- `POST /api/units/stop` — остановка юнита  
-- `POST /api/units/restart` — перезапуск юнита
-- `POST /api/units/enable` — включение юнита
-- `POST /api/units/disable` — отключение юнита
+- `POST /api/menu/playback/stop` — остановить воспроизведение
+- `POST /api/menu/playback/start` — запустить воспроизведение
+- `GET /api/menu/storage/check` — проверка Яндекс.Диска
+- `GET /api/menu/playlist/get` — получение настроек сервиса загрузки плейлистов
+- `PUT /api/menu/playlist/update` — обновление настроек сервиса загрузки плейлистов
+- `POST /api/menu/playlist/start-upload` — начать загрузку плейлиста (запустить `playlist.upload.service`)
+- `POST /api/menu/playlist/stop-upload` — остановить загрузку плейлиста (остановить `playlist.upload.service`)
+- `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
+- `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
+- `GET /api/menu/audio/get` — получить текущие настройки аудио
+- `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
+- `POST /api/menu/system/reload` — применить изменения (daemon-reload)
+- `POST /api/menu/system/reboot` — перезагрузка системы
+- `POST /api/menu/system/shutdown` — выключение системы
 
 ## Авторизация
 
@@ -172,7 +178,9 @@ sudo systemctl stop media-pi-agent
 sudo systemctl disable media-pi-agent
 
 # Удалить пакет и опционально конфигурацию
-# `apt remove --purge` удалит пакет и файлы конфигурации, находящиеся в `/etc/media-pi-agent/`. Если вы хотите сохранить конфигурацию (например, для отладки или повторной установки), не используйте `--purge` и просто выполните `sudo apt remove media-pi-agent`.
+# `apt remove --purge` удалит пакет и файлы конфигурации, находящиеся в `/etc/media-pi-agent/`. 
+# Если вы хотите сохранить конфигурацию (например, для отладки или повторной установки),
+# не используйте `--purge` и просто выполните `sudo apt remove media-pi-agent`.
 
 sudo apt remove --purge media-pi-agent
 

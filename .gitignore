@@ -9,6 +9,9 @@
 *.dylib
 *.test
 
+# Compiled binary from go build
+/media-pi.device
+
 # Output of go coverage tool
 *.out
 

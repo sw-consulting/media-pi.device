@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/dbus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -298,7 +297,7 @@ func HandleListUnits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -359,7 +358,7 @@ func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := dbus.NewWithContext(context.Background())
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -429,7 +428,7 @@ func HandleUnitAction(action string) http.HandlerFunc {
 			return
 		}
 
-		conn, err := dbus.NewWithContext(context.Background())
+		conn, err := getDBusConnection(context.Background())
 		if err != nil {
 			JSONResponse(w, http.StatusInternalServerError, APIResponse{
 				OK:     false,

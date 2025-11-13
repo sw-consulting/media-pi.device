@@ -1,9 +1,9 @@
-//go:build !windows
+//go:build test && !windows
 
 // Copyright (c) 2025 sw.consulting
 // This file is a part of Media Pi device agent
 
-package tests
+package test
 
 import (
 	"bufio"
@@ -78,7 +78,10 @@ func TestSighupReloadIntegration(t *testing.T) {
 
 	// Start the agent process with MEDIA_PI_AGENT_CONFIG pointing to our config
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), "MEDIA_PI_AGENT_CONFIG="+cfgPath)
+	cmd.Env = append(os.Environ(),
+		"MEDIA_PI_AGENT_CONFIG="+cfgPath,
+		"MEDIA_PI_AGENT_MOCK_DBUS=1",
+	)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
