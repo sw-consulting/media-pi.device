@@ -24,10 +24,9 @@ jobs:
           go test -v ./... -coverprofile=coverage.out -covermode=atomic || true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: coverage.out
           fail_ci_if_error: false
         env:
-          # CODECOV_TOKEN is optional for public repos; set in secrets for private repos
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -96,24 +96,6 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/system/reboot` — перезагрузка системы
 - `POST /api/menu/system/shutdown` — выключение системы
 
-`PUT /api/menu/schedule/update` принимает JSON с массивами расписаний обновления и нерабочих интервалов:
-
-```
-{
-  "playlist": ["06:05", "16:28"],
-  "video": ["22:22"],
-  "rest": [
-    {"stop": "18:30", "start": "09:00"},
-    {"stop": "23:45", "start": "22:15"}
-  ]
-}
-```
-
-Поле `rest` опционально: если передать пустой массив, интервалы отдыха будут удалены.
-
-`GET /api/menu/schedule/get` возвращает дополнительное поле `rest` с массивом
-интервалов, считанных из пользовательского crontab.
-
 ## Авторизация
 
 Все API endpoints (кроме `/health`) требуют авторизации через Bearer token:
