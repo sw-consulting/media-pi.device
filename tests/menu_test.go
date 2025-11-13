@@ -97,7 +97,8 @@ func TestGetMenuActions(t *testing.T) {
 		"storage-check",
 		"playlist-get",
 		"playlist-update",
-		"playlist-select",
+		"playlist-start-upload",
+		"playlist-stop-upload",
 		"schedule-get",
 		"schedule-update",
 		"audio-get",
@@ -455,17 +456,25 @@ func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandlePlaylistSelectMethodNotAllowed(t *testing.T) {
+func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
 	agent.ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/select", nil)
+	// start-upload expects POST
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/start-upload", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-
-	agent.HandlePlaylistSelect(w, req)
-
+	agent.HandlePlaylistStartUpload(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
+		t.Errorf("expected status 405 for start-upload, got %d", w.Code)
+	}
+
+	// stop-upload expects POST
+	req2 := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/stop-upload", nil)
+	req2.Header.Set("Authorization", "Bearer test-key")
+	w2 := httptest.NewRecorder()
+	agent.HandlePlaylistStopUpload(w2, req2)
+	if w2.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405 for stop-upload, got %d", w2.Code)
 	}
 }
 
@@ -917,7 +926,8 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	expectedIDs := []string{
 		"playlist-get",
 		"playlist-update",
-		"playlist-select",
+		"playlist-start-upload",
+		"playlist-stop-upload",
 		"schedule-get",
 		"schedule-update",
 	}

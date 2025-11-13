@@ -134,12 +134,31 @@ func (n *noopDBusConnection) PowerOffContext(ctx context.Context) error {
 	return nil
 }
 
+// Define small interfaces for the concrete systemd/login1 connections so
+// tests can inject fakes. These mirror only the methods used by the agent.
+type systemdConn interface {
+	Close()
+	ReloadContext(ctx context.Context) error
+	StartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error)
+	StopUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error)
+	RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error)
+	EnableUnitFilesContext(ctx context.Context, files []string, runtime, force bool) (bool, []dbus.EnableUnitFileChange, error)
+	DisableUnitFilesContext(ctx context.Context, files []string, runtime bool) ([]dbus.DisableUnitFileChange, error)
+	GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error)
+}
+
+type login1Conn interface {
+	Close()
+	Reboot(askForAuth bool)
+	PowerOff(askForAuth bool)
+}
+
 // realDBusConnection is a thin adapter that implements DBusConnection by
 // delegating calls to the underlying systemd dbus connection and the login1
 // connection for power/reboot operations.
 type realDBusConnection struct {
-	sys   *dbus.Conn
-	login *login1.Conn
+	sys   systemdConn
+	login login1Conn
 }
 
 func (r *realDBusConnection) Close() {

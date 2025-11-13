@@ -130,11 +130,18 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/playlist/update",
 		},
 		{
-			ID:          "playlist-select",
-			Name:        "Выбор плейлиста",
-			Description: "Обновить конфигурацию сервиса загрузки плейлистов",
-			Method:      "PUT",
-			Path:        "/api/menu/playlist/select",
+			ID:          "playlist-start-upload",
+			Name:        "Начать загрузку плейлиста",
+			Description: "Запустить сервис загрузки плейлистов",
+			Method:      "POST",
+			Path:        "/api/menu/playlist/start-upload",
+		},
+		{
+			ID:          "playlist-stop-upload",
+			Name:        "Остановить загрузку плейлиста",
+			Description: "Остановить сервис загрузки плейлистов",
+			Method:      "POST",
+			Path:        "/api/menu/playlist/stop-upload",
 		},
 		{
 			ID:          "schedule-get",
@@ -738,40 +745,74 @@ type ScheduleUpdateRequest struct {
 }
 
 // HandlePlaylistSelect updates the playlist upload service configuration.
-func HandlePlaylistSelect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
+func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
 	}
 
-	var req FileContentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный JSON в теле запроса",
-		})
+	conn, err := getDBusConnection(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StartUnitContext(ctx, "playlist.upload.service", "replace", ch)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось запустить загрузку плейлиста: %v", err)})
 		return
 	}
 
-	if err := os.WriteFile(PlaylistServicePath, []byte(req.Content), 0644); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл: %v", err),
-		})
+	var result string
+	select {
+	case result = <-ch:
+	case <-ctx.Done():
+		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут запуска сервиса загрузки плейлиста"})
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "playlist-select",
-			Result:  "success",
-			Message: "Выбор плейлиста",
-		},
-	})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-start-upload", Result: result, Message: "Загрузка плейлиста запущена"}})
+}
+
+// HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
+func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	conn, err := getDBusConnection(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StopUnitContext(ctx, "playlist.upload.service", "replace", ch)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось остановить загрузку плейлиста: %v", err)})
+		return
+	}
+
+	var result string
+	select {
+	case result = <-ch:
+	case <-ctx.Done():
+		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут остановки сервиса загрузки плейлиста"})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-stop-upload", Result: result, Message: "Загрузка плейлиста остановлена"}})
 }
 
 // HandleScheduleGet returns the configured update timers for playlist and video uploads.
