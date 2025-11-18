@@ -357,7 +357,12 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Data != "unknown" {
+	// Expect object-shaped data
+	dataMap, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Data to be object, got %#v", resp.Data)
+	}
+	if dataMap["output"] != "unknown" {
 		t.Fatalf("expected unknown, got %#v", resp.Data)
 	}
 
@@ -382,7 +387,11 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Data != "hdmi" {
+	dataMap, ok = resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Data to be object, got %#v", resp.Data)
+	}
+	if dataMap["output"] != "hdmi" {
 		t.Fatalf("expected hdmi, got %#v", resp.Data)
 	}
 
@@ -407,7 +416,11 @@ func TestHandleAudioGetAndUpdate(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Data != "jack" {
+	dataMap, ok = resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Data to be object, got %#v", resp.Data)
+	}
+	if dataMap["output"] != "jack" {
 		t.Fatalf("expected jack, got %#v", resp.Data)
 	}
 }
