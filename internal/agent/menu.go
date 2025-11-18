@@ -541,6 +541,11 @@ type AudioUpdateRequest struct {
 	Output string `json:"output"`
 }
 
+// AudioSettingsDto represents response {"output":"hdmi"|"jack"|"unknown"}
+type AudioSettingsDto struct {
+	Output string `json:"output"`
+}
+
 // HandleAudioGet reads the `AudioConfigPath` file and returns the current
 // output: "hdmi", "jack" or "unknown".
 func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
@@ -552,7 +557,7 @@ func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(AudioConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "unknown"})
+			JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "unknown"}})
 			return
 		}
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфиг: %v", err)})
@@ -561,14 +566,14 @@ func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
 
 	content := string(data)
 	if strings.Contains(content, "card 0") {
-		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "hdmi"})
+		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "hdmi"}})
 		return
 	}
 	if strings.Contains(content, "card 1") {
-		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "jack"})
+		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "jack"}})
 		return
 	}
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: "unknown"})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "unknown"}})
 }
 
 // HandleAudioUpdate sets the audio output by writing `AudioConfigPath`.
@@ -578,14 +583,15 @@ func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req AudioUpdateRequest
+	var req AudioSettingsDto
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON"})
 		return
 	}
 
+	reqOutput := strings.ToLower(strings.TrimSpace(req.Output))
 	var config string
-	switch strings.ToLower(strings.TrimSpace(req.Output)) {
+	switch reqOutput {
 	case "hdmi":
 		config = "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
 	case "jack":
@@ -600,7 +606,7 @@ func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "audio-update", Result: "success", Message: req.Output}})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: reqOutput}})
 }
 
 // HandleSystemReload reloads systemd daemon configuration.
