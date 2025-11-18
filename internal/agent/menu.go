@@ -560,7 +560,11 @@ func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "unknown"}})
 			return
 		}
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфиг: %v", err)})
+		JSONResponse(
+			w,
+			http.StatusInternalServerError,
+			APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурационный файл: %v", err)},
+		)
 		return
 	}
 
@@ -602,7 +606,11 @@ func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := os.WriteFile(AudioConfigPath, []byte(config), 0644); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать конфиг: %v", err)})
+		JSONResponse(
+			w,
+			http.StatusInternalServerError,
+			APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать конфигурационный файл: %v", err)},
+		)
 		return
 	}
 
