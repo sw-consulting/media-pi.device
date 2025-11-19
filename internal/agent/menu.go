@@ -109,11 +109,11 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/playback/start",
 		},
 		{
-			ID:          "storage-check",
-			Name:        "Проверка яндекс диска",
-			Description: "Проверить статус Яндекс.Диска",
+			ID:          "service-status",
+			Name:        "Статус сервисов",
+			Description: "Получить статус сервисов и монтирования",
 			Method:      "GET",
-			Path:        "/api/menu/storage/check",
+			Path:        "/api/menu/service/status",
 		},
 		{
 			ID:          "playlist-get",
@@ -323,35 +323,103 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleStorageCheck checks the Yandex disk mount status.
-func HandleStorageCheck(w http.ResponseWriter, r *http.Request) {
+// ServiceStatusResponse describes the service status returned by the
+// service-status endpoint.
+type ServiceStatusResponse struct {
+	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
+	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
+	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
+}
+
+// isPathMounted checks whether the given path appears in /proc/mounts.
+// It is small and testable; tests may override behavior by creating a
+// temporary /proc/mounts-like file and setting os.Open to read from it
+// indirectly via injection if necessary. For simplicity we read the real
+// /proc/mounts which is fine for unit tests that don't rely on actual mounts.
+func isPathMounted(path string) bool {
+	// If a test-provided mounts file is set, prefer parsing it. This keeps
+	// unit tests hermetic.
+	if mountsPath := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS"); mountsPath != "" {
+		if f, err := os.Open(mountsPath); err == nil {
+			defer func() { _ = f.Close() }()
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				fields := strings.Fields(scanner.Text())
+				if len(fields) >= 2 && fields[1] == path {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Try POSIX device-id method: compare device IDs of the path and its
+	// parent. If they differ, the path is a mount point.
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	parent := filepath.Clean(filepath.Join(path, ".."))
+	pfi, err := os.Lstat(parent)
+	if err != nil {
+		return false
+	}
+
+	if ok, same := sameDevice(fi, pfi); ok {
+		return !same
+	}
+
+	// Fallback: parse /proc/mounts if device-id check isn't available.
+	if f, err := os.Open("/proc/mounts"); err == nil {
+		defer func() { _ = f.Close() }()
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			fields := strings.Fields(scanner.Text())
+			if len(fields) >= 2 && fields[1] == path {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// HandleServiceStatus returns statuses for playback, playlist upload services
+// and whether the Yandex disk mount point is mounted.
+func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
 	}
 
-	cmd := exec.Command("ls", "-l", "/mnt/ya.disk")
-	output, err := cmd.CombinedOutput()
-
-	result := "success"
-	message := strings.TrimSpace(string(output))
-
+	conn, err := getDBusConnection(context.Background())
 	if err != nil {
-		result = "error"
-		message = fmt.Sprintf("Ошибка проверки диска: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Helper to query ActiveState from unit properties.
+	checkUnit := func(unit string) bool {
+		props, err := conn.GetUnitPropertiesContext(ctx, unit)
+		if err != nil {
+			return false
+		}
+		if state, ok := props["ActiveState"].(string); ok {
+			return state == "active"
+		}
+		return false
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "storage-check",
-			Result:  result,
-			Message: message,
-		},
-	})
+	resp := ServiceStatusResponse{
+		PlaybackServiceStatus:       checkUnit("play.video.service"),
+		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
+		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})
 }
 
 // PlaylistUploadConfig represents the relevant configuration extracted from
@@ -737,11 +805,6 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 type RestTimePair struct {
 	Stop  string `json:"stop"`
 	Start string `json:"start"`
-}
-
-// FileContentRequest represents a request to update a file.
-type FileContentRequest struct {
-	Content string `json:"content"`
 }
 
 // ScheduleResponse represents the current update schedule.
