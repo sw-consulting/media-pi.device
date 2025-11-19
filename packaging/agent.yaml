@@ -16,3 +16,6 @@ server_key: ""
 
 # Listen address for REST API
 listen_addr: "0.0.0.0:8081"
+
+# Username for media-pi service operations (crontab and systemd timers, default: pi)
+media_pi_service_user: "pi"

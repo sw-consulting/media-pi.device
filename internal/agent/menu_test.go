@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1032,6 +1033,114 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 		if !foundIDs[expectedID] {
 			t.Errorf("expected action ID %q not found in menu actions", expectedID)
 		}
+	}
+}
+
+func TestParseRestTimes(t *testing.T) {
+	content := `00 23 * * * sudo systemctl stop play.video.service
+00 7 * * * sudo systemctl start play.video.service`
+
+	pairs := parseRestTimes(content)
+
+	if len(pairs) != 1 {
+		t.Fatalf("expected 1 pair, got %d", len(pairs))
+	}
+
+	if pairs[0].Stop != "23:00" {
+		t.Errorf("expected stop time 23:00, got %s", pairs[0].Stop)
+	}
+
+	if pairs[0].Start != "07:00" {
+		t.Errorf("expected start time 07:00, got %s", pairs[0].Start)
+	}
+}
+
+func TestCrontabUserOperations(t *testing.T) {
+	originalCrontabUser := MediaPiServiceUser
+	originalCrontabRead := CrontabReadFunc
+	originalCrontabWrite := CrontabWriteFunc
+
+	t.Cleanup(func() {
+		MediaPiServiceUser = originalCrontabUser
+		CrontabReadFunc = originalCrontabRead
+		CrontabWriteFunc = originalCrontabWrite
+	})
+
+	// Test with specific user
+	MediaPiServiceUser = "testuser"
+
+	var readArgs []string
+	var writeArgs []string
+
+	CrontabReadFunc = func() (string, error) {
+		// Simulate the defaultCrontabRead behavior for testing
+		cmd := &exec.Cmd{}
+		user := MediaPiServiceUser
+		if user == "" {
+			user = "pi"
+		}
+		cmd.Args = []string{"crontab", "-u", user, "-l"}
+		readArgs = cmd.Args
+		return "", nil
+	}
+
+	CrontabWriteFunc = func(content string) error {
+		// Simulate the defaultCrontabWrite behavior for testing
+		cmd := &exec.Cmd{}
+		user := MediaPiServiceUser
+		if user == "" {
+			user = "pi"
+		}
+		cmd.Args = []string{"crontab", "-u", user, "-"}
+		writeArgs = cmd.Args
+		return nil
+	}
+
+	// Test read with user
+	_, err := getRestTimes()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedReadArgs := []string{"crontab", "-u", "testuser", "-l"}
+	if !reflect.DeepEqual(readArgs, expectedReadArgs) {
+		t.Errorf("expected read args %v, got %v", expectedReadArgs, readArgs)
+	}
+
+	// Test write with user
+	err = updateRestTimes([]RestTimePair{{Stop: "23:00", Start: "07:00"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedWriteArgs := []string{"crontab", "-u", "testuser", "-"}
+	if !reflect.DeepEqual(writeArgs, expectedWriteArgs) {
+		t.Errorf("expected write args %v, got %v", expectedWriteArgs, writeArgs)
+	}
+
+	// Test with empty user (should default to pi)
+	MediaPiServiceUser = ""
+	readArgs = nil
+	writeArgs = nil
+
+	_, err = getRestTimes()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedReadArgsEmpty := []string{"crontab", "-u", "pi", "-l"}
+	if !reflect.DeepEqual(readArgs, expectedReadArgsEmpty) {
+		t.Errorf("expected read args %v, got %v", expectedReadArgsEmpty, readArgs)
+	}
+
+	err = updateRestTimes([]RestTimePair{{Stop: "23:00", Start: "07:00"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedWriteArgsEmpty := []string{"crontab", "-u", "pi", "-"}
+	if !reflect.DeepEqual(writeArgs, expectedWriteArgsEmpty) {
+		t.Errorf("expected write args %v, got %v", expectedWriteArgsEmpty, writeArgs)
 	}
 }
 

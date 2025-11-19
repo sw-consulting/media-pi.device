@@ -29,9 +29,10 @@ import (
 // from YAML and contains the list of allowed systemd units, the server
 // authentication key and the listen address for the HTTP API.
 type Config struct {
-	AllowedUnits []string `yaml:"allowed_units"`
-	ServerKey    string   `yaml:"server_key,omitempty"`
-	ListenAddr   string   `yaml:"listen_addr,omitempty"`
+	AllowedUnits       []string `yaml:"allowed_units"`
+	ServerKey          string   `yaml:"server_key,omitempty"`
+	ListenAddr         string   `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser string   `yaml:"media_pi_service_user,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -77,6 +78,10 @@ var (
 	// ConfigPath holds the path to the active configuration file. It must
 	// be set by the caller (main) before calling ReloadConfig.
 	ConfigPath string
+
+	// MediaPiServiceUser is the username for crontab and systemd timer operations.
+	// It defaults to "pi" and is loaded from the configuration.
+	MediaPiServiceUser string
 )
 
 // DefaultListenAddr is used when the configuration does not specify a
@@ -108,8 +113,9 @@ func GetVersion() string {
 // DefaultConfig returns a reasonable default Config.
 func DefaultConfig() Config {
 	return Config{
-		AllowedUnits: []string{},
-		ListenAddr:   DefaultListenAddr,
+		AllowedUnits:       []string{},
+		ListenAddr:         DefaultListenAddr,
+		MediaPiServiceUser: "pi",
 	}
 }
 
@@ -135,8 +141,14 @@ func LoadConfigFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("server_key is required in configuration")
 	}
 
+	// Set default media-pi service user if not specified
+	if c.MediaPiServiceUser == "" {
+		c.MediaPiServiceUser = "pi"
+	}
+
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
+	MediaPiServiceUser = c.MediaPiServiceUser
 
 	return &c, nil
 }
