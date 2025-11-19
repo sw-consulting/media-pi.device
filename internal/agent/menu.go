@@ -383,7 +383,7 @@ func isPathMounted(path string) bool {
 	return false
 }
 
-// HandleSystemStatus returns statuses for playback, playlist upload services
+// HandleServiceStatus returns statuses for playback, playlist upload services
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
