@@ -341,7 +341,7 @@ func isPathMounted(path string) bool {
 	// unit tests hermetic.
 	if mountsPath := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS"); mountsPath != "" {
 		if f, err := os.Open(mountsPath); err == nil {
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
 				fields := strings.Fields(scanner.Text())
@@ -371,7 +371,7 @@ func isPathMounted(path string) bool {
 
 	// Fallback: parse /proc/mounts if device-id check isn't available.
 	if f, err := os.Open("/proc/mounts"); err == nil {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			fields := strings.Fields(scanner.Text())

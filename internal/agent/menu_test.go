@@ -198,8 +198,14 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 		t.Fatalf("failed to write mounts: %v", err)
 	}
 	originalProc := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS")
-	os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", mounts)
-	t.Cleanup(func() { os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", originalProc) })
+	if err := os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", mounts); err != nil {
+		t.Fatalf("failed to set env: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", originalProc); err != nil {
+			t.Fatalf("failed to restore env: %v", err)
+		}
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/service/status", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
