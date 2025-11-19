@@ -34,6 +34,34 @@ listen_addr: "0.0.0.0:8081"
 	if _, ok := AllowedUnits["reload.service"]; !ok {
 		t.Fatalf("expected allowed unit reload.service after reload")
 	}
+	// Check default media-pi service user is set
+	if MediaPiServiceUser != "pi" {
+		t.Fatalf("expected default media-pi service user 'pi', got %q", MediaPiServiceUser)
+	}
+}
+
+func TestReloadConfigWithCrontabUser(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "yaml")
+
+	yamlData := `allowed_units:
+  - reload.service
+server_key: "reload-key-xyz"
+listen_addr: "0.0.0.0:8081"
+media_pi_service_user: "customuser"
+`
+	if err := os.WriteFile(p, []byte(yamlData), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Load initial config through LoadConfigFrom via ConfigPath+Reload
+	ConfigPath = p
+	if err := ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig failed: %v", err)
+	}
+	if MediaPiServiceUser != "customuser" {
+		t.Fatalf("expected media-pi service user 'customuser', got %q", MediaPiServiceUser)
+	}
 }
 
 func TestInternalReloadHandler(t *testing.T) {

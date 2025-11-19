@@ -42,7 +42,7 @@ export CORE_API_BASE="https://your-server.com"
 sudo -E setup-media-pi.sh
 ```
 
-**Важно:** Переменная `CORE_API_BASE` должна указывать на URL/port сервера управления (контейнер media-pi.core).
+**Важно:** Переменная `CORE_API_BASE` должна указывать на URL/port media-pi агента (контейнер media-pi.core).
 
 ### Обновление
 
@@ -111,7 +111,7 @@ curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8081/api/units
 
 Скрипт настройки `setup-media-pi.sh` поддерживает следующие переменные окружения:
 
-- `CORE_API_BASE` — URL API сервера управления (обязательно для продакшена)
+- `CORE_API_BASE` — URL API media-pi агента (обязательно для продакшена)
   - По умолчанию: `https://media-pi.sw.consulting:8086`
   - Пример: `https://your-management-server.com`
 
@@ -130,9 +130,15 @@ allowed_units:
   - example.service
 server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8081"
+media_pi_service_user: "pi"
 ```
 
-Ключ сервера (`server_key`) генерируется автоматически и используется для аутентификации API запросов.
+Параметры конфигурации:
+
+- `allowed_units` — список разрешённых systemd сервисов для управления
+- `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
+- `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
+- `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`). Этот параметр определяет, от имени какого пользователя будут выполняться операции управления расписанием интервалов отдыха через API `/api/menu/schedule/get` и `/api/menu/schedule/update`
 
 ## Устранение неполадок
 
@@ -157,6 +163,32 @@ curl http://localhost:8081/health
    ```bash
    echo $CORE_API_BASE
    ```
+
+2. Проверьте доступность сервера управления:
+   ```bash
+   curl -I "$CORE_API_BASE/api/status/status"
+   ```
+
+3. Проверьте права доступа к конфигурации:
+   ```bash
+   ls -la /etc/media-pi-agent/
+   ```
+
+### Проблемы с расписанием (crontab)
+
+Если расписание интервалов отдыха отображается некорректно через API `/api/menu/schedule/get`:
+
+1. Проверьте, что параметр `media_pi_service_user` в конфигурации указывает на правильного пользователя:
+   ```bash
+   sudo cat /etc/media-pi-agent/agent.yaml | grep media_pi_service_user
+   ```
+
+2. Проверьте crontab указанного пользователя:
+   ```bash
+   sudo crontab -u pi -l  # заменить 'pi' на значение media_pi_service_user
+   ```
+
+3. Убедитесь, что media-pi агент имеет права на управление crontab указанного пользователя (обычно требуется запуск от root)
 
 2. Проверьте доступность сервера управления:
    ```bash

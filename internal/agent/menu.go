@@ -1405,7 +1405,7 @@ func splitCronLine(line string) (string, string, error) {
 }
 
 func defaultCrontabRead() (string, error) {
-	cmd := exec.Command("crontab", "-l")
+	cmd := exec.Command("crontab", "-u", MediaPiServiceUser, "-l")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		text := strings.ToLower(string(output))
@@ -1415,16 +1415,16 @@ func defaultCrontabRead() (string, error) {
 		if strings.Contains(text, "no crontab for") {
 			return "", nil
 		}
-		return "", fmt.Errorf("crontab -l: %w: %s", err, string(output))
+		return "", fmt.Errorf("crontab %s: %w: %s", strings.Join(cmd.Args[1:], " "), err, string(output))
 	}
 	return string(output), nil
 }
 
 func defaultCrontabWrite(content string) error {
-	cmd := exec.Command("crontab", "-")
+	cmd := exec.Command("crontab", "-u", MediaPiServiceUser, "-")
 	cmd.Stdin = strings.NewReader(content)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("crontab -: %w: %s", err, string(output))
+		return fmt.Errorf("crontab %s: %w: %s", strings.Join(cmd.Args[1:], " "), err, string(output))
 	}
 	return nil
 }
@@ -1588,7 +1588,7 @@ func writeTimerSchedule(filePath, description, unit string, times []string) erro
 	}
 	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
 	builder.WriteString("Persistent=true\n")
-	builder.WriteString("User=pi\n\n")
+	builder.WriteString(fmt.Sprintf("User=%s\n\n", MediaPiServiceUser))
 	builder.WriteString("[Install]\n")
 	builder.WriteString("WantedBy=timers.target\n")
 
