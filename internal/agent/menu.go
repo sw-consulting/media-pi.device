@@ -108,13 +108,13 @@ func GetMenuActions() []MenuAction {
 			Method:      "POST",
 			Path:        "/api/menu/playback/start",
 		},
-				{
-					ID:          "service-status",
-					Name:        "Статус сервисов",
-					Description: "Получить статус сервисов и монтирования",
-					Method:      "GET",
-					Path:        "/api/menu/service/status",
-				},
+		{
+			ID:          "service-status",
+			Name:        "Статус сервисов",
+			Description: "Получить статус сервисов и монтирования",
+			Method:      "GET",
+			Path:        "/api/menu/service/status",
+		},
 		{
 			ID:          "playlist-get",
 			Name:        "Получить источник плейлиста",

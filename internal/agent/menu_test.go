@@ -212,7 +212,7 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	}
 
 	var resp struct {
-		OK   bool                 `json:"ok"`
+		OK   bool                  `json:"ok"`
 		Data ServiceStatusResponse `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
