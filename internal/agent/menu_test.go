@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +93,7 @@ func TestGetMenuActions(t *testing.T) {
 	expectedIDs := []string{
 		"playback-stop",
 		"playback-start",
-		"storage-check",
+		"service-status",
 		"playlist-get",
 		"playlist-update",
 		"playlist-start-upload",
@@ -163,17 +164,90 @@ func TestHandlePlaybackStartMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandleStorageCheckMethodNotAllowed(t *testing.T) {
+// (removed TestHandleStorageCheckMethodNotAllowed; storage-check endpoint replaced by system-status)
+
+func TestHandleServiceStatusMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
 
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/storage/check", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/service/status", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleStorageCheck(w, req)
+	HandleServiceStatus(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
+	ServerKey = "test-key"
+
+	// Replace DBus factory with one that returns a noopDBusConnection
+	originalFactory := dbusFactory
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return &noopDBusConnectionForStatus{}, nil
+	})
+	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
+
+	// Create a temporary mounts file and point isPathMounted to read it by
+	// using the MEDIA_PI_AGENT_PROC_MOUNTS environment variable.
+	tmp := t.TempDir()
+	mounts := filepath.Join(tmp, "mounts")
+	if err := os.WriteFile(mounts, []byte("/dev/sda1 /mnt/ya.disk ext4 rw 0 0\n"), 0644); err != nil {
+		t.Fatalf("failed to write mounts: %v", err)
+	}
+	originalProc := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS")
+	os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", mounts)
+	t.Cleanup(func() { os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", originalProc) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/service/status", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleServiceStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		OK   bool                 `json:"ok"`
+		Data ServiceStatusResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if !resp.OK {
+		t.Fatalf("expected ok response")
+	}
+
+	if resp.Data.PlaybackServiceStatus != true {
+		t.Fatalf("expected playback service to be active, got %v", resp.Data.PlaybackServiceStatus)
+	}
+	if resp.Data.PlaylistUploadServiceStatus != false {
+		t.Fatalf("expected playlist upload service to be inactive, got %v", resp.Data.PlaylistUploadServiceStatus)
+	}
+
+	// Ensure the mount detection reads our temp mounts file
+	if resp.Data.YaDiskMountStatus != true {
+		t.Fatalf("expected ya disk to be reported mounted, got %v", resp.Data.YaDiskMountStatus)
+	}
+}
+
+// noopDBusConnectionForStatus is a test helper that reports ActiveState=active
+// for play.video.service and inactive for playlist.upload.service.
+type noopDBusConnectionForStatus struct{ noopDBusConnection }
+
+func (n *noopDBusConnectionForStatus) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
+	switch unit {
+	case "play.video.service":
+		return map[string]any{"ActiveState": "active"}, nil
+	case "playlist.upload.service":
+		return map[string]any{"ActiveState": "inactive"}, nil
+	default:
+		return map[string]any{"ActiveState": "inactive"}, nil
 	}
 }
 
