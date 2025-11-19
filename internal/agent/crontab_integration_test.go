@@ -57,9 +57,11 @@ func TestCrontabUserIntegration(t *testing.T) {
 		t.Fatalf("Failed to get rest times: %v", err)
 	}
 
-	// Verify the parsed rest times match the original crontab entries (23:00 stop, 07:00 start)
+	// Verify the parsed rest times match the original crontab entries
+	// Service stop at 23:00 = rest starts at 23:00
+	// Service start at 07:00 = rest stops at 07:00
 	expectedRestTimes := []RestTimePair{
-		{Stop: "23:00", Start: "07:00"},
+		{Start: "23:00", Stop: "07:00"},
 	}
 
 	if !reflect.DeepEqual(restTimes, expectedRestTimes) {
@@ -67,9 +69,10 @@ func TestCrontabUserIntegration(t *testing.T) {
 	}
 
 	// Test 2: Update rest times with new schedule
+	// Rest from 22:30 to 08:00 and lunch break from 12:00 to 13:00
 	newRestTimes := []RestTimePair{
-		{Stop: "22:30", Start: "08:00"},
-		{Stop: "12:00", Start: "13:00"}, // lunch break
+		{Start: "22:30", Stop: "08:00"},
+		{Start: "12:00", Stop: "13:00"}, // lunch break
 	}
 
 	err = updateRestTimes(newRestTimes)
@@ -91,19 +94,19 @@ func TestCrontabUserIntegration(t *testing.T) {
 
 	// Should contain new rest schedule entries
 	if !containsLine(lines, "30 22 * * * sudo systemctl stop play.video.service") {
-		t.Error("Expected new stop time 22:30")
+		t.Error("Expected new rest start time 22:30 (service stop)")
 	}
 
 	if !containsLine(lines, "00 08 * * * sudo systemctl start play.video.service") {
-		t.Error("Expected new start time 08:00")
+		t.Error("Expected new rest stop time 08:00 (service start)")
 	}
 
 	if !containsLine(lines, "00 12 * * * sudo systemctl stop play.video.service") {
-		t.Error("Expected lunch break stop time 12:00")
+		t.Error("Expected lunch break rest start time 12:00 (service stop)")
 	}
 
 	if !containsLine(lines, "00 13 * * * sudo systemctl start play.video.service") {
-		t.Error("Expected lunch break start time 13:00")
+		t.Error("Expected lunch break rest stop time 13:00 (service start)")
 	}
 
 	// Should NOT contain old rest entries

@@ -763,7 +763,9 @@ WantedBy=timers.target
 		t.Fatalf("expected ok response")
 	}
 
-	expectedRest := []RestTimePair{{Stop: "18:30", Start: "09:00"}}
+	// Service stop at 18:30 = rest starts at 18:30
+	// Service start at 09:00 = rest stops at 09:00
+	expectedRest := []RestTimePair{{Start: "18:30", Stop: "09:00"}}
 	if !reflect.DeepEqual(expectedRest, resp.Data.Rest) {
 		t.Fatalf("unexpected rest schedule: %#v", resp.Data.Rest)
 	}
@@ -841,7 +843,7 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 		return nil
 	}
 
-	body := `{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"13:00","stop":"12:00"},{"start":"07:00","stop":"23:45"}]}`
+	body := `{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -883,19 +885,19 @@ func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
 	}
 
 	if !strings.Contains(writtenCron, "00 12 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected stop entry for 12:00, got %q", writtenCron)
+		t.Fatalf("expected stop entry for 12:00 (rest start), got %q", writtenCron)
 	}
 
 	if !strings.Contains(writtenCron, "00 13 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected start entry for 13:00, got %q", writtenCron)
+		t.Fatalf("expected start entry for 13:00 (rest stop), got %q", writtenCron)
 	}
 
 	if !strings.Contains(writtenCron, "45 23 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected stop entry for 23:45, got %q", writtenCron)
+		t.Fatalf("expected stop entry for 23:45 (rest start), got %q", writtenCron)
 	}
 
 	if !strings.Contains(writtenCron, "00 07 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected start entry for 07:00, got %q", writtenCron)
+		t.Fatalf("expected start entry for 07:00 (rest stop), got %q", writtenCron)
 	}
 }
 
@@ -996,7 +998,7 @@ func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
 		return nil
 	}
 
-	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"12:00","stop":"10:00"},{"start":"13:00","stop":"11:00"}]}`
+	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -1046,12 +1048,14 @@ func TestParseRestTimes(t *testing.T) {
 		t.Fatalf("expected 1 pair, got %d", len(pairs))
 	}
 
-	if pairs[0].Stop != "23:00" {
-		t.Errorf("expected stop time 23:00, got %s", pairs[0].Stop)
+	// Service stop at 23:00 = rest starts at 23:00
+	if pairs[0].Start != "23:00" {
+		t.Errorf("expected rest start time 23:00, got %s", pairs[0].Start)
 	}
 
-	if pairs[0].Start != "07:00" {
-		t.Errorf("expected start time 07:00, got %s", pairs[0].Start)
+	// Service start at 07:00 = rest stops at 07:00
+	if pairs[0].Stop != "07:00" {
+		t.Errorf("expected rest stop time 07:00, got %s", pairs[0].Stop)
 	}
 }
 
@@ -1222,6 +1226,75 @@ func TestSanitizeSystemdValue(t *testing.T) {
 			result := SanitizeSystemdValue(tt.input)
 			if result != tt.expected {
 				t.Errorf("SanitizeSystemdValue(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateRestTimePairsOverlap(t *testing.T) {
+	tests := []struct {
+		name     string
+		pairs    []RestTimePair
+		hasError bool
+	}{
+		{
+			name: "No overlap - same day intervals",
+			pairs: []RestTimePair{
+				{Start: "09:00", Stop: "10:00"},
+				{Start: "14:00", Stop: "15:00"},
+			},
+			hasError: false,
+		},
+		{
+			name: "No overlap - midnight crossing intervals",
+			pairs: []RestTimePair{
+				{Start: "23:00", Stop: "01:00"},
+				{Start: "10:00", Stop: "11:00"},
+			},
+			hasError: false,
+		},
+		{
+			name: "Overlap - same day intervals",
+			pairs: []RestTimePair{
+				{Start: "09:00", Stop: "11:00"},
+				{Start: "10:00", Stop: "12:00"},
+			},
+			hasError: true,
+		},
+		{
+			name: "Overlap - midnight crossing with same day",
+			pairs: []RestTimePair{
+				{Start: "23:00", Stop: "02:00"},
+				{Start: "01:00", Stop: "03:00"},
+			},
+			hasError: true,
+		},
+		{
+			name: "Adjacent intervals (no overlap)",
+			pairs: []RestTimePair{
+				{Start: "09:00", Stop: "10:00"},
+				{Start: "10:00", Stop: "11:00"},
+			},
+			hasError: false,
+		},
+		{
+			name: "Full day coverage (no overlap)",
+			pairs: []RestTimePair{
+				{Start: "00:00", Stop: "12:00"},
+				{Start: "12:00", Stop: "23:59"},
+			},
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRestTimePairs(tt.pairs)
+			if tt.hasError && err == nil {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.hasError && err != nil {
+				t.Errorf("expected no error but got: %v", err)
 			}
 		})
 	}

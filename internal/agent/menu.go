@@ -802,9 +802,11 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 }
 
 // RestTimePair describes a single rest-time interval with start and stop times.
+// Start is when the rest period begins (service stops)
+// Stop is when the rest period ends (service starts)
 type RestTimePair struct {
-	Stop  string `json:"stop"`
-	Start string `json:"start"`
+	Start string `json:"start"` // When rest begins (service stops)
+	Stop  string `json:"stop"`  // When rest ends (service starts)
 }
 
 // ScheduleResponse represents the current update schedule.
@@ -1048,7 +1050,7 @@ func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
 		start := strings.TrimSpace(pair.Start)
 		stop := strings.TrimSpace(pair.Stop)
 		if start == "" || stop == "" {
-			return nil, errors.New("для каждого интервала необходимо указать start и stop")
+			return nil, errors.New("для каждого интервала отдыха необходимо указать начало и конец")
 		}
 		pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
 	}
@@ -1060,14 +1062,14 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 		return nil
 	}
 
-	type parsedPair struct {
-		index int
-		start int
-		stop  int
+	// Validate time format and convert to minutes since midnight
+	type restInterval struct {
+		start int // minutes since midnight when rest starts
+		stop  int // minutes since midnight when rest stops
+		index int // original index for stable sorting
 	}
 
-	parsed := make([]parsedPair, len(pairs))
-	occupied := make([]bool, 24*60)
+	intervals := make([]restInterval, 0, len(pairs))
 
 	for i, pair := range pairs {
 		if !isValidTimeFormat(pair.Start) || !isValidTimeFormat(pair.Stop) {
@@ -1076,103 +1078,88 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 
 		startHour, startMinute, err := parseTimeValue(pair.Start)
 		if err != nil {
-			return err
+			return fmt.Errorf("ошибка в времени начала отдыха: %v", err)
 		}
 		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
 		if err != nil {
-			return err
+			return fmt.Errorf("ошибка в времени окончания отдыха: %v", err)
 		}
 
 		startMin := startHour*60 + startMinute
 		stopMin := stopHour*60 + stopMinute
+
 		if startMin == stopMin {
 			return errors.New("интервал отдыха не может иметь нулевую длительность")
 		}
 
-		if err := markRestInterval(occupied, stopMin, startMin); err != nil {
-			return err
-		}
-
-		parsed[i] = parsedPair{index: i, start: startMin, stop: stopMin}
+		intervals = append(intervals, restInterval{
+			start: startMin,
+			stop:  stopMin,
+			index: i,
+		})
 	}
 
-	sort.SliceStable(parsed, func(i, j int) bool {
-		if parsed[i].stop == parsed[j].stop {
-			return parsed[i].index < parsed[j].index
+	// Sort intervals by start time, then by original index for stability
+	sort.SliceStable(intervals, func(i, j int) bool {
+		if intervals[i].start == intervals[j].start {
+			return intervals[i].index < intervals[j].index
 		}
-		return parsed[i].stop < parsed[j].stop
+		return intervals[i].start < intervals[j].start
 	})
 
-	const day = 24 * 60
-	prevStop := -1
-	prevEnd := -1
+	// Check for overlaps
+	for i := 0; i < len(intervals); i++ {
+		current := intervals[i]
 
-	for _, pair := range parsed {
-		timelineStop := pair.stop
-		timelineEnd := pair.start
+		// Normalize intervals that cross midnight
+		currentStart := current.start
+		currentStop := current.stop
+		if currentStop <= currentStart {
+			currentStop += 24 * 60 // Add 24 hours
+		}
 
-		if prevStop == -1 {
-			if timelineEnd <= timelineStop {
-				timelineEnd += day
+		// Check against all other intervals
+		for j := i + 1; j < len(intervals); j++ {
+			other := intervals[j]
+
+			// Check multiple scenarios for the other interval
+			for dayOffset := 0; dayOffset < 2; dayOffset++ {
+				otherStart := other.start + dayOffset*24*60
+				otherStop := other.stop + dayOffset*24*60
+
+				if otherStop <= otherStart {
+					otherStop += 24 * 60
+				}
+
+				// Check if intervals overlap
+				if intervalsOverlap(currentStart, currentStop, otherStart, otherStop) {
+					return errors.New("интервалы отдыха не должны пересекаться")
+				}
 			}
-			prevStop = timelineStop
-			prevEnd = timelineEnd
-			continue
 		}
 
-		for timelineStop <= prevStop {
-			timelineStop += day
-		}
+		// Also check if current interval overlaps with next day occurrence of earlier intervals
+		for j := 0; j < i; j++ {
+			other := intervals[j]
 
-		if timelineStop <= prevEnd {
-			return errors.New("интервалы отдыха не должны пересекаться")
-		}
+			// Check if current interval overlaps with other's next day occurrence
+			otherNextDayStart := other.start + 24*60
+			otherNextDayStop := other.stop + 24*60
+			if otherNextDayStop <= otherNextDayStart {
+				otherNextDayStop += 24 * 60
+			}
 
-		for timelineEnd <= timelineStop {
-			timelineEnd += day
-		}
-
-		prevStop = timelineStop
-		prevEnd = timelineEnd
-	}
-
-	firstStop := parsed[0].stop
-	if prevStop != -1 {
-		nextCycleStart := firstStop + day
-		if prevEnd >= nextCycleStart {
-			return errors.New("интервалы отдыха не должны пересекаться через границу суток")
+			if intervalsOverlap(currentStart, currentStop, otherNextDayStart, otherNextDayStop) {
+				return errors.New("интервалы отдыха не должны пересекаться через границу суток")
+			}
 		}
 	}
 
 	return nil
 }
 
-func markRestInterval(occupied []bool, stopMin, startMin int) error {
-	day := len(occupied)
-	if day == 0 {
-		return nil
-	}
-
-	minute := stopMin % day
-	startTarget := startMin % day
-	steps := 0
-
-	for {
-		if occupied[minute] {
-			return errors.New("интервалы отдыха не должны пересекаться")
-		}
-		occupied[minute] = true
-		minute = (minute + 1) % day
-		steps++
-		if minute == startTarget {
-			break
-		}
-		if steps >= day {
-			return errors.New("интервал отдыха не может занимать целые сутки")
-		}
-	}
-
-	return nil
+func intervalsOverlap(start1, stop1, start2, stop2 int) bool {
+	return start1 < stop2 && start2 < stop1
 }
 
 func updateRestTimes(pairs []RestTimePair) error {
@@ -1212,23 +1199,26 @@ func getRestTimes() ([]RestTimePair, error) {
 func parseRestTimes(content string) []RestTimePair {
 	lines := splitCrontabLines(content)
 	pairs := make([]RestTimePair, 0)
+
 	for i := 0; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
 		switch trimmed {
 		case restStopMarker:
 			if i+1 < len(lines) {
 				if timeValue, err := parseCronCommandTime(lines[i+1], restStopCommand); err == nil {
-					pairs = append(pairs, RestTimePair{Stop: timeValue})
+					// Service stop = rest start
+					pairs = append(pairs, RestTimePair{Start: timeValue})
 					i++
 				}
 			}
 		case restStartMarker:
 			if i+1 < len(lines) {
 				if timeValue, err := parseCronCommandTime(lines[i+1], restStartCommand); err == nil {
-					if len(pairs) == 0 || pairs[len(pairs)-1].Start != "" {
-						pairs = append(pairs, RestTimePair{Start: timeValue})
+					// Service start = rest stop
+					if len(pairs) == 0 || pairs[len(pairs)-1].Stop != "" {
+						pairs = append(pairs, RestTimePair{Stop: timeValue})
 					} else {
-						pairs[len(pairs)-1].Start = timeValue
+						pairs[len(pairs)-1].Stop = timeValue
 					}
 					i++
 				}
@@ -1236,26 +1226,28 @@ func parseRestTimes(content string) []RestTimePair {
 		default:
 			if isRestCommandLine(lines[i], restStopCommand) {
 				if timeValue, err := parseCronCommandTime(lines[i], restStopCommand); err == nil {
-					pairs = append(pairs, RestTimePair{Stop: timeValue})
+					// Service stop = rest start
+					pairs = append(pairs, RestTimePair{Start: timeValue})
 				}
 			} else if isRestCommandLine(lines[i], restStartCommand) {
 				if timeValue, err := parseCronCommandTime(lines[i], restStartCommand); err == nil {
-					if len(pairs) == 0 || pairs[len(pairs)-1].Start != "" {
-						pairs = append(pairs, RestTimePair{Start: timeValue})
+					// Service start = rest stop
+					if len(pairs) == 0 || pairs[len(pairs)-1].Stop != "" {
+						pairs = append(pairs, RestTimePair{Stop: timeValue})
 					} else {
-						pairs[len(pairs)-1].Start = timeValue
+						pairs[len(pairs)-1].Stop = timeValue
 					}
 				}
 			}
 		}
 	}
 
+	// Filter out incomplete pairs
 	cleaned := make([]RestTimePair, 0, len(pairs))
 	for _, pair := range pairs {
-		if pair.Start == "" || pair.Stop == "" {
-			continue
+		if pair.Start != "" && pair.Stop != "" {
+			cleaned = append(cleaned, pair)
 		}
-		cleaned = append(cleaned, pair)
 	}
 	return cleaned
 }
@@ -1318,22 +1310,31 @@ func buildRestCronEntries(pairs []RestTimePair) ([]string, error) {
 		return nil, nil
 	}
 	entries := make([]string, 0, len(pairs)*5)
+
 	for idx, pair := range pairs {
+		// Parse rest start time (when service should stop)
 		startHour, startMinute, err := parseTimeValue(pair.Start)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ошибка в времени начала отдыха: %v", err)
 		}
+
+		// Parse rest stop time (when service should start)
 		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ошибка в времени окончания отдыха: %v", err)
 		}
+
 		if idx > 0 {
 			entries = append(entries, "")
 		}
+
+		// Add service stop entry (rest begins)
 		entries = append(entries, restStopMarker)
-		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", stopMinute, stopHour, restStopCommand))
+		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", startMinute, startHour, restStopCommand))
+
+		// Add service start entry (rest ends)
 		entries = append(entries, restStartMarker)
-		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", startMinute, startHour, restStartCommand))
+		entries = append(entries, fmt.Sprintf("%02d %02d * * * %s", stopMinute, stopHour, restStartCommand))
 	}
 	return entries, nil
 }
