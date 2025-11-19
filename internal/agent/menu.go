@@ -739,11 +739,6 @@ type RestTimePair struct {
 	Start string `json:"start"`
 }
 
-// FileContentRequest represents a request to update a file.
-type FileContentRequest struct {
-	Content string `json:"content"`
-}
-
 // ScheduleResponse represents the current update schedule.
 type ScheduleResponse struct {
 	Playlist []string       `json:"playlist"`
