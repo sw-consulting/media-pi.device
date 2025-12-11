@@ -96,7 +96,7 @@ func TestGetMenuActions(t *testing.T) {
 		"playback-start",
 		"service-status",
 		"configuration-get",
-		"configuration-upload",
+		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
 		"system-reload",
@@ -267,13 +267,13 @@ func TestHandleConfigurationGetMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandleConfigurationUploadMethodNotAllowed(t *testing.T) {
+func TestHandleConfigurationUpdateMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/configuration/upload", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/configuration/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleConfigurationUpload(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
@@ -453,11 +453,11 @@ WantedBy = multi-user.target
 	})
 
 	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/upload", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleConfigurationUpload(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -529,11 +529,11 @@ func TestHandleConfigurationUploadValidation(t *testing.T) {
 	}
 
 	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["25:00"],"video":["08:00"],"rest":[]},"audio":{"output":"invalid"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/upload", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleConfigurationUpload(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -636,11 +636,11 @@ func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
 	})
 
 	body := `{"playlist":{"source":"/a","destination":"/b"},"schedule":{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]},"audio":{"output":"hdmi"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/upload", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleConfigurationUpload(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -656,7 +656,7 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 
 	expectedIDs := []string{
 		"configuration-get",
-		"configuration-upload",
+		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
 	}
