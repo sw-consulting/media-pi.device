@@ -144,6 +144,20 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/playlist/stop-upload",
 		},
 		{
+			ID:          "video-start-upload",
+			Name:        "Начать загрузку видео",
+			Description: "Запустить сервис загрузки видео",
+			Method:      "POST",
+			Path:        "/api/menu/video/start-upload",
+		},
+		{
+			ID:          "video-stop-upload",
+			Name:        "Остановить загрузку видео",
+			Description: "Остановить сервис загрузки видео",
+			Method:      "POST",
+			Path:        "/api/menu/video/stop-upload",
+		},
+		{
 			ID:          "system-reload",
 			Name:        "Применить изменения",
 			Description: "Перезагрузить конфигурацию systemd",
@@ -198,6 +212,7 @@ type ConfigurationSettings struct {
 type ServiceStatusResponse struct {
 	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
 	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
+	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
 	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
 }
 
@@ -414,6 +429,7 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
 		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
+		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
 		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
 	}
 
@@ -810,9 +826,17 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// HandlePlaylistSelect updates the playlist upload service configuration.
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
-func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
+// handleUploadServiceAction executes shared logic for starting and stopping upload services.
+func handleUploadServiceAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	unit string,
+	actionID string,
+	errMsg string,
+	timeoutMsg string,
+	successMsg string,
+	action func(context.Context, DBusConnection, chan string, string) error,
+) {
 	if r.Method != http.MethodPost {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
@@ -829,9 +853,8 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	ch := make(chan string, 1)
-	_, err = conn.StartUnitContext(ctx, "playlist.upload.service", "replace", ch)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось запустить загрузку плейлиста: %v", err)})
+	if err := action(ctx, conn, ch, unit); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf(errMsg, err)})
 		return
 	}
 
@@ -839,46 +862,59 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	select {
 	case result = <-ch:
 	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут запуска сервиса загрузки плейлиста"})
+		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: timeoutMsg})
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-start-upload", Result: result, Message: "Загрузка плейлиста запущена"}})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
+}
+
+// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
+func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
+		"Не удалось запустить загрузку плейлиста: %v",
+		"Таймаут запуска сервиса загрузки плейлиста",
+		"Загрузка плейлиста запущена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
 }
 
 // HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
+	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-stop-upload",
+		"Не удалось остановить загрузку плейлиста: %v",
+		"Таймаут остановки сервиса загрузки плейлиста",
+		"Загрузка плейлиста остановлена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
+}
 
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
-	}
-	defer conn.Close()
+// HandleVideoStartUpload starts the video.upload.service via D-Bus.
+func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "video.upload.service", "video-start-upload",
+		"Не удалось запустить загрузку видео: %v",
+		"Таймаут запуска сервиса загрузки видео",
+		"Загрузка видео запущена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	_, err = conn.StopUnitContext(ctx, "playlist.upload.service", "replace", ch)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось остановить загрузку плейлиста: %v", err)})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут остановки сервиса загрузки плейлиста"})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-stop-upload", Result: result, Message: "Загрузка плейлиста остановлена"}})
+// HandleVideoStopUpload stops the video.upload.service via D-Bus.
+func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "video.upload.service", "video-stop-upload",
+		"Не удалось остановить загрузку видео: %v",
+		"Таймаут остановки сервиса загрузки видео",
+		"Загрузка видео остановлена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
 }
 
 // HandleScheduleGet returns the configured update timers for playlist and video uploads.
