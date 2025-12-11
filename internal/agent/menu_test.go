@@ -376,7 +376,7 @@ WantedBy=timers.target
 	}
 
 	if !resp.OK {
-		t.Fatalf("expected OK response, got %s", resp.Data)
+		t.Fatalf("expected OK response, got %+v", resp.Data)
 	}
 
 	if resp.Data.Playlist.Source != "/mnt/src/playlist/" || resp.Data.Playlist.Destination != "/mnt/dst/playlist/" {
