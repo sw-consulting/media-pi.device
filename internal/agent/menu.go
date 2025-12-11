@@ -167,6 +167,40 @@ func GetMenuActions() []MenuAction {
 	}
 }
 
+// PlaylistUploadConfig represents the relevant configuration extracted from
+// playlist.upload.service.
+type PlaylistUploadConfig struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// ScheduleSettings represents playlist/video timer settings and optional rest periods.
+type ScheduleSettings struct {
+	Playlist []string       `json:"playlist"`
+	Video    []string       `json:"video"`
+	Rest     []RestTimePair `json:"rest,omitempty"`
+}
+
+// AudioSettings describes the selected audio output.
+type AudioSettings struct {
+	Output string `json:"output"`
+}
+
+// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+type ConfigurationSettings struct {
+	Playlist PlaylistUploadConfig `json:"playlist"`
+	Schedule ScheduleSettings     `json:"schedule"`
+	Audio    AudioSettings        `json:"audio"`
+}
+
+// ServiceStatusResponse describes the service status returned by the
+// service-status endpoint.
+type ServiceStatusResponse struct {
+	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
+	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
+	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
+}
+
 // HandleMenuList returns the list of available menu actions.
 func HandleMenuList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -295,14 +329,6 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ServiceStatusResponse describes the service status returned by the
-// service-status endpoint.
-type ServiceStatusResponse struct {
-	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
-	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
-	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
-}
-
 // isPathMounted checks whether the given path appears in /proc/mounts.
 // It is small and testable; tests may override behavior by creating a
 // temporary /proc/mounts-like file and setting os.Open to read from it
@@ -392,13 +418,6 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})
-}
-
-// PlaylistUploadConfig represents the relevant configuration extracted from
-// playlist.upload.service.
-type PlaylistUploadConfig struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
 }
 
 // readPlaylistUploadConfig parses the playlist upload service file and returns
@@ -496,27 +515,6 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 	}
 
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
-}
-
-// (removed deprecated handlers: audio-hdmi and audio-jack)
-
-// ScheduleSettings represents playlist/video timer settings and optional rest periods.
-type ScheduleSettings struct {
-	Playlist []string       `json:"playlist"`
-	Video    []string       `json:"video"`
-	Rest     []RestTimePair `json:"rest,omitempty"`
-}
-
-// AudioSettings describes the selected audio output.
-type AudioSettings struct {
-	Output string `json:"output"`
-}
-
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
-type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
 }
 
 func readAudioSettings() (AudioSettings, error) {
