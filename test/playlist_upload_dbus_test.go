@@ -20,12 +20,15 @@ import (
 type fakePlaylistConn struct {
 	startCalled bool
 	stopCalled  bool
+	startUnit   string
+	stopUnit    string
 }
 
 func (f *fakePlaylistConn) Close()                                  {}
 func (f *fakePlaylistConn) ReloadContext(ctx context.Context) error { return nil }
 func (f *fakePlaylistConn) StartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
 	f.startCalled = true
+	f.startUnit = name
 	if ch != nil {
 		select {
 		case ch <- "done":
@@ -36,6 +39,7 @@ func (f *fakePlaylistConn) StartUnitContext(ctx context.Context, name, mode stri
 }
 func (f *fakePlaylistConn) StopUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
 	f.stopCalled = true
+	f.stopUnit = name
 	if ch != nil {
 		select {
 		case ch <- "done":
@@ -59,49 +63,81 @@ func (f *fakePlaylistConn) GetUnitPropertiesContext(ctx context.Context, unit st
 func (f *fakePlaylistConn) RebootContext(ctx context.Context) error   { return nil }
 func (f *fakePlaylistConn) PowerOffContext(ctx context.Context) error { return nil }
 
-func TestPlaylistStartUpload_CallsDBusStart(t *testing.T) {
-	fake := &fakePlaylistConn{}
-	agent.SetDBusConnectionFactory(func(ctx context.Context) (agent.DBusConnection, error) {
-		return fake, nil
-	})
-	defer agent.SetDBusConnectionFactory(nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/playlist/start-upload", nil)
-	rr := httptest.NewRecorder()
-
-	agent.HandlePlaylistStartUpload(rr, req)
-
-	if rr.Result().StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", rr.Result().StatusCode)
+func TestUploadServiceActions_CallsDBus(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		handler      func(http.ResponseWriter, *http.Request)
+		expectStart  bool
+		expectStop   bool
+		expectedUnit string
+	}{
+		{
+			name:         "playlist start",
+			path:         "/api/menu/playlist/start-upload",
+			handler:      agent.HandlePlaylistStartUpload,
+			expectStart:  true,
+			expectedUnit: "playlist.upload.service",
+		},
+		{
+			name:         "playlist stop",
+			path:         "/api/menu/playlist/stop-upload",
+			handler:      agent.HandlePlaylistStopUpload,
+			expectStop:   true,
+			expectedUnit: "playlist.upload.service",
+		},
+		{
+			name:         "video start",
+			path:         "/api/menu/video/start-upload",
+			handler:      agent.HandleVideoStartUpload,
+			expectStart:  true,
+			expectedUnit: "video.upload.service",
+		},
+		{
+			name:         "video stop",
+			path:         "/api/menu/video/stop-upload",
+			handler:      agent.HandleVideoStopUpload,
+			expectStop:   true,
+			expectedUnit: "video.upload.service",
+		},
 	}
 
-	// Give goroutine-channel a short moment (handlers are synchronous but use channel)
-	time.Sleep(10 * time.Millisecond)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakePlaylistConn{}
+			agent.SetDBusConnectionFactory(func(ctx context.Context) (agent.DBusConnection, error) {
+				return fake, nil
+			})
+			t.Cleanup(func() { agent.SetDBusConnectionFactory(nil) })
 
-	if !fake.startCalled {
-		t.Fatalf("expected StartUnitContext to be called on DBus connection")
-	}
-}
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			rr := httptest.NewRecorder()
 
-func TestPlaylistStopUpload_CallsDBusStop(t *testing.T) {
-	fake := &fakePlaylistConn{}
-	agent.SetDBusConnectionFactory(func(ctx context.Context) (agent.DBusConnection, error) {
-		return fake, nil
-	})
-	defer agent.SetDBusConnectionFactory(nil)
+			tt.handler(rr, req)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/playlist/stop-upload", nil)
-	rr := httptest.NewRecorder()
+			if rr.Result().StatusCode != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d", rr.Result().StatusCode)
+			}
 
-	agent.HandlePlaylistStopUpload(rr, req)
+			time.Sleep(10 * time.Millisecond)
 
-	if rr.Result().StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", rr.Result().StatusCode)
-	}
+			if tt.expectStart {
+				if !fake.startCalled {
+					t.Fatalf("expected StartUnitContext to be called on DBus connection")
+				}
+				if fake.startUnit != tt.expectedUnit {
+					t.Fatalf("expected start unit %s, got %s", tt.expectedUnit, fake.startUnit)
+				}
+			}
 
-	time.Sleep(10 * time.Millisecond)
-
-	if !fake.stopCalled {
-		t.Fatalf("expected StopUnitContext to be called on DBus connection")
+			if tt.expectStop {
+				if !fake.stopCalled {
+					t.Fatalf("expected StopUnitContext to be called on DBus connection")
+				}
+				if fake.stopUnit != tt.expectedUnit {
+					t.Fatalf("expected stop unit %s, got %s", tt.expectedUnit, fake.stopUnit)
+				}
+			}
+		})
 	}
 }

@@ -144,6 +144,20 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/playlist/stop-upload",
 		},
 		{
+			ID:          "video-start-upload",
+			Name:        "Начать загрузку видео",
+			Description: "Запустить сервис загрузки видео",
+			Method:      "POST",
+			Path:        "/api/menu/video/start-upload",
+		},
+		{
+			ID:          "video-stop-upload",
+			Name:        "Остановить загрузку видео",
+			Description: "Остановить сервис загрузки видео",
+			Method:      "POST",
+			Path:        "/api/menu/video/stop-upload",
+		},
+		{
 			ID:          "system-reload",
 			Name:        "Применить изменения",
 			Description: "Перезагрузить конфигурацию systemd",
@@ -165,6 +179,41 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/system/shutdown",
 		},
 	}
+}
+
+// PlaylistUploadConfig represents the relevant configuration extracted from
+// playlist.upload.service.
+type PlaylistUploadConfig struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// ScheduleSettings represents playlist/video timer settings and optional rest periods.
+type ScheduleSettings struct {
+	Playlist []string       `json:"playlist"`
+	Video    []string       `json:"video"`
+	Rest     []RestTimePair `json:"rest,omitempty"`
+}
+
+// AudioSettings describes the selected audio output.
+type AudioSettings struct {
+	Output string `json:"output"`
+}
+
+// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+type ConfigurationSettings struct {
+	Playlist PlaylistUploadConfig `json:"playlist"`
+	Schedule ScheduleSettings     `json:"schedule"`
+	Audio    AudioSettings        `json:"audio"`
+}
+
+// ServiceStatusResponse describes the service status returned by the
+// service-status endpoint.
+type ServiceStatusResponse struct {
+	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
+	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
+	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
+	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
 }
 
 // HandleMenuList returns the list of available menu actions.
@@ -295,14 +344,6 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ServiceStatusResponse describes the service status returned by the
-// service-status endpoint.
-type ServiceStatusResponse struct {
-	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
-	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
-	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
-}
-
 // isPathMounted checks whether the given path appears in /proc/mounts.
 // It is small and testable; tests may override behavior by creating a
 // temporary /proc/mounts-like file and setting os.Open to read from it
@@ -388,17 +429,11 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
 		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
+		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
 		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})
-}
-
-// PlaylistUploadConfig represents the relevant configuration extracted from
-// playlist.upload.service.
-type PlaylistUploadConfig struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
 }
 
 // readPlaylistUploadConfig parses the playlist upload service file and returns
@@ -498,27 +533,6 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
-// (removed deprecated handlers: audio-hdmi and audio-jack)
-
-// ScheduleSettings represents playlist/video timer settings and optional rest periods.
-type ScheduleSettings struct {
-	Playlist []string       `json:"playlist"`
-	Video    []string       `json:"video"`
-	Rest     []RestTimePair `json:"rest,omitempty"`
-}
-
-// AudioSettings describes the selected audio output.
-type AudioSettings struct {
-	Output string `json:"output"`
-}
-
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
-type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
-}
-
 func readAudioSettings() (AudioSettings, error) {
 	data, err := os.ReadFile(AudioConfigPath)
 	if err != nil {
@@ -539,7 +553,19 @@ func readAudioSettings() (AudioSettings, error) {
 	}
 }
 
+func validateAudioOutput(output string) error {
+	reqOutput := strings.ToLower(strings.TrimSpace(output))
+	if reqOutput != "hdmi" && reqOutput != "jack" {
+		return fmt.Errorf("output должен быть 'hdmi' или 'jack'")
+	}
+	return nil
+}
+
 func writeAudioSettings(output string) error {
+	if err := validateAudioOutput(output); err != nil {
+		return err
+	}
+
 	reqOutput := strings.ToLower(strings.TrimSpace(output))
 	var config string
 	switch reqOutput {
@@ -547,8 +573,6 @@ func writeAudioSettings(output string) error {
 		config = "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
 	case "jack":
 		config = "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
-	default:
-		return fmt.Errorf("output должен быть 'hdmi' или 'jack'")
 	}
 
 	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
@@ -634,15 +658,20 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateAudioOutput(req.Audio.Output); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
 	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
 	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err)})
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки плейлиста: %v", err)})
 		return
 	}
 
 	normalizedVideo, err := normalizeTimes(req.Schedule.Video)
 	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err)})
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки видео: %v", err)})
 		return
 	}
 
@@ -812,9 +841,17 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// HandlePlaylistSelect updates the playlist upload service configuration.
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
-func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
+// handleUploadServiceAction executes shared logic for starting and stopping upload services.
+func handleUploadServiceAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	unit string,
+	actionID string,
+	errMsg string,
+	timeoutMsg string,
+	successMsg string,
+	action func(context.Context, DBusConnection, chan string, string) error,
+) {
 	if r.Method != http.MethodPost {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
@@ -831,9 +868,8 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	ch := make(chan string, 1)
-	_, err = conn.StartUnitContext(ctx, "playlist.upload.service", "replace", ch)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось запустить загрузку плейлиста: %v", err)})
+	if err := action(ctx, conn, ch, unit); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf(errMsg, err)})
 		return
 	}
 
@@ -841,46 +877,59 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	select {
 	case result = <-ch:
 	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут запуска сервиса загрузки плейлиста"})
+		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: timeoutMsg})
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-start-upload", Result: result, Message: "Загрузка плейлиста запущена"}})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
+}
+
+// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
+func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
+		"Не удалось запустить загрузку плейлиста: %v",
+		"Таймаут запуска сервиса загрузки плейлиста",
+		"Загрузка плейлиста запущена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
 }
 
 // HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
+	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-stop-upload",
+		"Не удалось остановить загрузку плейлиста: %v",
+		"Таймаут остановки сервиса загрузки плейлиста",
+		"Загрузка плейлиста остановлена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
+}
 
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
-	}
-	defer conn.Close()
+// HandleVideoStartUpload starts the video.upload.service via D-Bus.
+func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "video.upload.service", "video-start-upload",
+		"Не удалось запустить загрузку видео: %v",
+		"Таймаут запуска сервиса загрузки видео",
+		"Загрузка видео запущена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	_, err = conn.StopUnitContext(ctx, "playlist.upload.service", "replace", ch)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось остановить загрузку плейлиста: %v", err)})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: "Таймаут остановки сервиса загрузки плейлиста"})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "playlist-stop-upload", Result: result, Message: "Загрузка плейлиста остановлена"}})
+// HandleVideoStopUpload stops the video.upload.service via D-Bus.
+func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
+	handleUploadServiceAction(w, r, "video.upload.service", "video-stop-upload",
+		"Не удалось остановить загрузку видео: %v",
+		"Таймаут остановки сервиса загрузки видео",
+		"Загрузка видео остановлена",
+		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
+			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
+			return err
+		})
 }
 
 // HandleScheduleGet returns the configured update timers for playlist and video uploads.
