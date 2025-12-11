@@ -232,6 +232,9 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	if resp.Data.PlaylistUploadServiceStatus != false {
 		t.Fatalf("expected playlist upload service to be inactive, got %v", resp.Data.PlaylistUploadServiceStatus)
 	}
+	if resp.Data.VideoUploadServiceStatus != true {
+		t.Fatalf("expected video upload service to be active, got %v", resp.Data.VideoUploadServiceStatus)
+	}
 
 	// Ensure the mount detection reads our temp mounts file
 	if resp.Data.YaDiskMountStatus != true {
@@ -249,6 +252,8 @@ func (n *noopDBusConnectionForStatus) GetUnitPropertiesContext(ctx context.Conte
 		return map[string]any{"ActiveState": "active"}, nil
 	case "playlist.upload.service":
 		return map[string]any{"ActiveState": "inactive"}, nil
+	case "video.upload.service":
+		return map[string]any{"ActiveState": "active"}, nil
 	default:
 		return map[string]any{"ActiveState": "inactive"}, nil
 	}
@@ -602,6 +607,24 @@ func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
 	if w2.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405 for stop-upload, got %d", w2.Code)
 	}
+
+	// video start-upload expects POST
+	req3 := httptest.NewRequest(http.MethodGet, "/api/menu/video/start-upload", nil)
+	req3.Header.Set("Authorization", "Bearer test-key")
+	w3 := httptest.NewRecorder()
+	HandleVideoStartUpload(w3, req3)
+	if w3.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405 for video start-upload, got %d", w3.Code)
+	}
+
+	// video stop-upload expects POST
+	req4 := httptest.NewRequest(http.MethodGet, "/api/menu/video/stop-upload", nil)
+	req4.Header.Set("Authorization", "Bearer test-key")
+	w4 := httptest.NewRecorder()
+	HandleVideoStopUpload(w4, req4)
+	if w4.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405 for video stop-upload, got %d", w4.Code)
+	}
 }
 
 func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
@@ -659,6 +682,8 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
+		"video-start-upload",
+		"video-stop-upload",
 	}
 
 	foundIDs := make(map[string]bool)

@@ -77,6 +77,8 @@ func main() {
 	mux.HandleFunc("/api/menu/configuration/update", agent.AuthMiddleware(agent.HandleConfigurationUpdate))
 	mux.HandleFunc("/api/menu/playlist/start-upload", agent.AuthMiddleware(agent.HandlePlaylistStartUpload))
 	mux.HandleFunc("/api/menu/playlist/stop-upload", agent.AuthMiddleware(agent.HandlePlaylistStopUpload))
+	mux.HandleFunc("/api/menu/video/start-upload", agent.AuthMiddleware(agent.HandleVideoStartUpload))
+	mux.HandleFunc("/api/menu/video/stop-upload", agent.AuthMiddleware(agent.HandleVideoStopUpload))
 	mux.HandleFunc("/api/menu/system/reload", agent.AuthMiddleware(agent.HandleSystemReload))
 	mux.HandleFunc("/api/menu/system/reboot", agent.AuthMiddleware(agent.HandleSystemReboot))
 	mux.HandleFunc("/api/menu/system/shutdown", agent.AuthMiddleware(agent.HandleSystemShutdown))
