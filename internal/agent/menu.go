@@ -123,11 +123,11 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/configuration/get",
 		},
 		{
-			ID:          "configuration-upload",
+			ID:          "configuration-update",
 			Name:        "Обновить конфигурацию",
 			Description: "Обновить конфигурацию плейлиста, расписания и аудио",
 			Method:      "PUT",
-			Path:        "/api/menu/configuration/upload",
+			Path:        "/api/menu/configuration/update",
 		},
 		{
 			ID:          "playlist-start-upload",
@@ -598,8 +598,8 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
-// HandleConfigurationUpload updates playlist upload paths, schedule timers and audio output together.
-func HandleConfigurationUpload(w http.ResponseWriter, r *http.Request) {
+// HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
+func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
@@ -671,7 +671,7 @@ func HandleConfigurationUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-upload", Result: "success", Message: "Конфигурация обновлена"}})
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-update", Result: "success", Message: "Конфигурация обновлена"}})
 }
 
 // HandleSystemReload reloads systemd daemon configuration.
