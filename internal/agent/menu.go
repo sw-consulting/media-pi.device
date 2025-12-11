@@ -116,18 +116,18 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/service/status",
 		},
 		{
-			ID:          "playlist-get",
-			Name:        "Получить источник плейлиста",
-			Description: "Получить конфигурацию сервиса загрузки плейлистов",
+			ID:          "configuration-get",
+			Name:        "Получить конфигурацию",
+			Description: "Получить конфигурацию загрузки плейлиста, расписания и аудио",
 			Method:      "GET",
-			Path:        "/api/menu/playlist/get",
+			Path:        "/api/menu/configuration/get",
 		},
 		{
-			ID:          "playlist-update",
-			Name:        "Обновить источник плейлиста",
-			Description: "Обновить пути источника и назначения для сервиса загрузки плейлистов",
+			ID:          "configuration-upload",
+			Name:        "Обновить конфигурацию",
+			Description: "Обновить конфигурацию загрузки плейлиста, расписания и аудио",
 			Method:      "PUT",
-			Path:        "/api/menu/playlist/update",
+			Path:        "/api/menu/configuration/upload",
 		},
 		{
 			ID:          "playlist-start-upload",
@@ -142,34 +142,6 @@ func GetMenuActions() []MenuAction {
 			Description: "Остановить сервис загрузки плейлистов",
 			Method:      "POST",
 			Path:        "/api/menu/playlist/stop-upload",
-		},
-		{
-			ID:          "schedule-get",
-			Name:        "Получить расписание обновлений",
-			Description: "Получить расписание обновления плейлистов и видео",
-			Method:      "GET",
-			Path:        "/api/menu/schedule/get",
-		},
-		{
-			ID:          "schedule-update",
-			Name:        "Обновить расписание",
-			Description: "Установить расписание обновления плейлистов и видео",
-			Method:      "PUT",
-			Path:        "/api/menu/schedule/update",
-		},
-		{
-			ID:          "audio-get",
-			Name:        "Получить аудио-вывод",
-			Description: "Получить текущую настройку вывода звука (hdmi|jack)",
-			Method:      "GET",
-			Path:        "/api/menu/audio/get",
-		},
-		{
-			ID:          "audio-update",
-			Name:        "Обновить аудио-вывод",
-			Description: "Установить вывод звука (hdmi|jack)",
-			Method:      "PUT",
-			Path:        "/api/menu/audio/update",
 		},
 		{
 			ID:          "system-reload",
@@ -526,142 +498,49 @@ func writePlaylistUploadConfig(path, source, destination string) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
-// HandlePlaylistGet returns the source and destination configured for the
-// playlist upload service.
-func HandlePlaylistGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	cfg, err := readPlaylistUploadConfig(PlaylistServicePath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err),
-		})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: cfg})
-}
-
-// PlaylistUpdateRequest represents a request to update playlist upload source
-// and destination paths.
-type PlaylistUpdateRequest struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-}
-
-// HandlePlaylistUpdate writes a new source and destination to the
-// playlist.upload.service file.
-func HandlePlaylistUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	var req PlaylistUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный JSON в теле запроса",
-		})
-		return
-	}
-
-	req.Source = strings.TrimSpace(req.Source)
-	req.Destination = strings.TrimSpace(req.Destination)
-
-	if req.Source == "" || req.Destination == "" {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Поля source и destination обязательны",
-		})
-		return
-	}
-
-	if err := writePlaylistUploadConfig(PlaylistServicePath, req.Source, req.Destination); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err),
-		})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{
-		Action:  "playlist-update",
-		Result:  "success",
-		Message: "Конфигурация плейлиста обновлена",
-	}})
-}
-
 // (removed deprecated handlers: audio-hdmi and audio-jack)
 
-// AudioUpdateRequest represents {"output":"hdmi"|"jack"}
-type AudioUpdateRequest struct {
+// ScheduleSettings represents playlist/video timer settings and optional rest periods.
+type ScheduleSettings struct {
+	Playlist []string       `json:"playlist"`
+	Video    []string       `json:"video"`
+	Rest     []RestTimePair `json:"rest,omitempty"`
+}
+
+// AudioSettings describes the selected audio output.
+type AudioSettings struct {
 	Output string `json:"output"`
 }
 
-// AudioSettingsDto represents response {"output":"hdmi"|"jack"|"unknown"}
-type AudioSettingsDto struct {
-	Output string `json:"output"`
+// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+type ConfigurationSettings struct {
+	Playlist PlaylistUploadConfig `json:"playlist"`
+	Schedule ScheduleSettings     `json:"schedule"`
+	Audio    AudioSettings        `json:"audio"`
 }
 
-// HandleAudioGet reads the `AudioConfigPath` file and returns the current
-// output: "hdmi", "jack" or "unknown".
-func HandleAudioGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
+func readAudioSettings() (AudioSettings, error) {
 	data, err := os.ReadFile(AudioConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "unknown"}})
-			return
+			return AudioSettings{Output: "unknown"}, nil
 		}
-		JSONResponse(
-			w,
-			http.StatusInternalServerError,
-			APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурационный файл: %v", err)},
-		)
-		return
+		return AudioSettings{}, fmt.Errorf("Не удалось прочитать конфигурационный файл: %w", err)
 	}
 
 	content := string(data)
-	if strings.Contains(content, "card 0") {
-		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "hdmi"}})
-		return
+	switch {
+	case strings.Contains(content, "card 0"):
+		return AudioSettings{Output: "hdmi"}, nil
+	case strings.Contains(content, "card 1"):
+		return AudioSettings{Output: "jack"}, nil
+	default:
+		return AudioSettings{Output: "unknown"}, nil
 	}
-	if strings.Contains(content, "card 1") {
-		JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "jack"}})
-		return
-	}
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: "unknown"}})
 }
 
-// HandleAudioUpdate sets the audio output by writing `AudioConfigPath`.
-func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
-	var req AudioSettingsDto
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON"})
-		return
-	}
-
-	reqOutput := strings.ToLower(strings.TrimSpace(req.Output))
+func writeAudioSettings(output string) error {
+	reqOutput := strings.ToLower(strings.TrimSpace(output))
 	var config string
 	switch reqOutput {
 	case "hdmi":
@@ -669,20 +548,130 @@ func HandleAudioUpdate(w http.ResponseWriter, r *http.Request) {
 	case "jack":
 		config = "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
 	default:
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "output должен быть 'hdmi' или 'jack'"})
+		return fmt.Errorf("output должен быть 'hdmi' или 'jack'")
+	}
+
+	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
+}
+
+// HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
+func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
 	}
 
-	if err := os.WriteFile(AudioConfigPath, []byte(config), 0644); err != nil {
-		JSONResponse(
-			w,
-			http.StatusInternalServerError,
-			APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать конфигурационный файл: %v", err)},
-		)
+	playlistCfg, err := readPlaylistUploadConfig(PlaylistServicePath)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err)})
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: AudioSettingsDto{Output: reqOutput}})
+	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err)})
+		return
+	}
+
+	videoTimers, err := readTimerSchedule(VideoTimerPath)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err)})
+		return
+	}
+
+	restTimes, err := getRestTimes()
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать crontab: %v", err)})
+		return
+	}
+
+	audioSettings, err := readAudioSettings()
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
+		Playlist: playlistCfg,
+		Schedule: ScheduleSettings{Playlist: playlistTimers, Video: videoTimers, Rest: restTimes},
+		Audio:    audioSettings,
+	}})
+}
+
+// HandleConfigurationUpload updates playlist upload paths, schedule timers and audio output together.
+func HandleConfigurationUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	var req ConfigurationSettings
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON в теле запроса"})
+		return
+	}
+
+	playlistSource := strings.TrimSpace(req.Playlist.Source)
+	playlistDestination := strings.TrimSpace(req.Playlist.Destination)
+	if playlistSource == "" || playlistDestination == "" {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поля source и destination обязательны"})
+		return
+	}
+
+	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный формат времени. Используйте HH:MM"})
+		return
+	}
+
+	restPairs, err := sanitizeRestPairs(req.Schedule.Rest)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	if err := validateRestTimePairs(restPairs); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err)})
+		return
+	}
+
+	normalizedVideo, err := normalizeTimes(req.Schedule.Video)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err)})
+		return
+	}
+
+	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, playlistDestination); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err)})
+		return
+	}
+
+	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err)})
+		return
+	}
+
+	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err)})
+		return
+	}
+
+	if err := updateRestTimes(restPairs); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err)})
+		return
+	}
+
+	if err := writeAudioSettings(req.Audio.Output); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-upload", Result: "success", Message: "Конфигурация обновлена"}})
 }
 
 // HandleSystemReload reloads systemd daemon configuration.
