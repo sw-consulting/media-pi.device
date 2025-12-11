@@ -95,14 +95,10 @@ func TestGetMenuActions(t *testing.T) {
 		"playback-stop",
 		"playback-start",
 		"service-status",
-		"playlist-get",
-		"playlist-update",
+		"configuration-get",
+		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
-		"schedule-get",
-		"schedule-update",
-		"audio-get",
-		"audio-update",
 		"system-reload",
 		"system-reboot",
 		"system-shutdown",
@@ -258,251 +254,289 @@ func (n *noopDBusConnectionForStatus) GetUnitPropertiesContext(ctx context.Conte
 	}
 }
 
-func TestHandlePlaylistGetMethodNotAllowed(t *testing.T) {
+func TestHandleConfigurationGetMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/playlist/get", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/configuration/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandlePlaylistGet(w, req)
+	HandleConfigurationGet(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
-func TestHandlePlaylistUpdateMethodNotAllowed(t *testing.T) {
+func TestHandleConfigurationUpdateMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/update", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/configuration/update", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandlePlaylistUpdate(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
-func TestHandleAudioGetMethodNotAllowed(t *testing.T) {
-	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/audio/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleAudioGet(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandleAudioUpdateMethodNotAllowed(t *testing.T) {
-	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/update", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleAudioUpdate(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandlePlaylistGet(t *testing.T) {
+func TestHandleConfigurationGet(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+	audioPath := filepath.Join(tmp, "asound.conf")
 
 	originalServicePath := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
 	PlaylistServicePath = servicePath
-	t.Cleanup(func() { PlaylistServicePath = originalServicePath })
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
+	AudioConfigPath = audioPath
+	t.Cleanup(func() {
+		PlaylistServicePath = originalServicePath
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+	})
 
-	content := `[Unit]
+	serviceContent := `[Unit]
 Description = Rsync playlist upload service
 [Service]
 ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
 [Install]
 WantedBy = multi-user.target
 `
-
-	if err := os.WriteFile(servicePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
 		t.Fatalf("failed to write service file: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/get", nil)
+	playlistContent := `[Unit]
+Description = Playlist upload timer
+
+[Timer]
+OnCalendar=--* 12:32:00
+OnCalendar=--* 16:28:00
+
+[Install]
+WantedBy=timers.target
+`
+	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
+		t.Fatalf("failed to write playlist timer: %v", err)
+	}
+
+	videoContent := `[Unit]
+Description = Video upload timer
+
+[Timer]
+OnCalendar=--* 22:22:00
+
+[Install]
+WantedBy=timers.target
+`
+	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
+		t.Fatalf("failed to write video timer: %v", err)
+	}
+
+	if err := os.WriteFile(audioPath, []byte("defaults.pcm.card 0\n"), 0644); err != nil {
+		t.Fatalf("failed to write audio config: %v", err)
+	}
+
+	originalCrontabRead := CrontabReadFunc
+	CrontabReadFunc = func() (string, error) {
+		return strings.Join([]string{
+			"# MEDIA_PI_REST STOP",
+			"30 18 * * * sudo systemctl stop play.video.service",
+			"# MEDIA_PI_REST START",
+			"00 09 * * * sudo systemctl start play.video.service",
+		}, "\n") + "\n", nil
+	}
+	t.Cleanup(func() { CrontabReadFunc = originalCrontabRead })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/configuration/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandlePlaylistGet(w, req)
+	HandleConfigurationGet(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
 	}
 
-	var resp APIResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	var resp struct {
+		OK   bool                  `json:"ok"`
+		Data ConfigurationSettings `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
 	if !resp.OK {
-		t.Fatalf("expected OK response, got error: %s", resp.ErrMsg)
+		t.Fatalf("expected OK response, got %+v", resp.Data)
 	}
 
-	data, ok := resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected response data to be a map, got %T", resp.Data)
+	if resp.Data.Playlist.Source != "/mnt/src/playlist/" || resp.Data.Playlist.Destination != "/mnt/dst/playlist/" {
+		t.Fatalf("unexpected playlist config: %+v", resp.Data.Playlist)
 	}
 
-	if got := data["source"]; got != "/mnt/src/playlist/" {
-		t.Fatalf("unexpected source, got %v", got)
+	if !reflect.DeepEqual([]string{"12:32", "16:28"}, resp.Data.Schedule.Playlist) {
+		t.Fatalf("unexpected playlist timers: %+v", resp.Data.Schedule.Playlist)
 	}
-	if got := data["destination"]; got != "/mnt/dst/playlist/" {
-		t.Fatalf("unexpected destination, got %v", got)
+	if !reflect.DeepEqual([]string{"22:22"}, resp.Data.Schedule.Video) {
+		t.Fatalf("unexpected video timers: %+v", resp.Data.Schedule.Video)
+	}
+
+	expectedRest := []RestTimePair{{Start: "18:30", Stop: "09:00"}}
+	if !reflect.DeepEqual(expectedRest, resp.Data.Schedule.Rest) {
+		t.Fatalf("unexpected rest schedule: %+v", resp.Data.Schedule.Rest)
+	}
+
+	if resp.Data.Audio.Output != "hdmi" {
+		t.Fatalf("expected hdmi output, got %s", resp.Data.Audio.Output)
 	}
 }
 
-func TestHandlePlaylistUpdate(t *testing.T) {
+func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
 	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+	audioPath := filepath.Join(tmp, "asound.conf")
 
 	originalServicePath := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
 	PlaylistServicePath = servicePath
-	t.Cleanup(func() { PlaylistServicePath = originalServicePath })
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
+	AudioConfigPath = audioPath
+	t.Cleanup(func() {
+		PlaylistServicePath = originalServicePath
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+	})
 
-	content := `[Unit]
+	serviceContent := `[Unit]
 Description = Rsync playlist upload service
 [Service]
 ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
-ExecStartPost = /home/pi/videoplay.sh
 [Install]
 WantedBy = multi-user.target
 `
-
-	if err := os.WriteFile(servicePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
 		t.Fatalf("failed to write service file: %v", err)
 	}
 
-	body := strings.NewReader(`{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/playlist/update", body)
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	var (
+		writeCalled bool
+		writtenCron string
+	)
+	CrontabWriteFunc = func(content string) error {
+		writeCalled = true
+		writtenCron = content
+		return nil
+	}
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandlePlaylistUpdate(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	updated, err := os.ReadFile(servicePath)
+	updatedService, err := os.ReadFile(servicePath)
 	if err != nil {
 		t.Fatalf("failed to read updated service file: %v", err)
 	}
 
-	if !strings.Contains(string(updated), "ExecStart = /usr/bin/rsync -czavP /mnt/ya.disk/playlist/test/ /mnt/usb/playlist/ # nightly sync") {
-		t.Fatalf("updated service file does not contain new paths:\n%s", string(updated))
+	if !strings.Contains(string(updatedService), "/mnt/ya.disk/playlist/test/ /mnt/usb/playlist/") {
+		t.Fatalf("updated service file does not contain new paths: %s", string(updatedService))
 	}
 
-	if !strings.Contains(string(updated), "# nightly sync") {
-		t.Fatalf("updated service file lost inline comment:\n%s", string(updated))
+	playlistData, err := os.ReadFile(playlistTimer)
+	if err != nil {
+		t.Fatalf("failed to read playlist timer: %v", err)
+	}
+	if !strings.Contains(string(playlistData), "OnCalendar=--* 06:05:00") {
+		t.Fatalf("expected normalized playlist time, got %s", string(playlistData))
+	}
+
+	videoData, err := os.ReadFile(videoTimer)
+	if err != nil {
+		t.Fatalf("failed to read video timer: %v", err)
+	}
+	if !strings.Contains(string(videoData), "OnCalendar=--* 22:22:00") {
+		t.Fatalf("expected video time, got %s", string(videoData))
+	}
+
+	if !writeCalled {
+		t.Fatalf("expected crontab to be written")
+	}
+	if strings.Count(writtenCron, "# MEDIA_PI_REST STOP") != 2 {
+		t.Fatalf("expected two rest stop markers, got %q", writtenCron)
+	}
+
+	audioData, err := os.ReadFile(audioPath)
+	if err != nil {
+		t.Fatalf("failed to read audio config: %v", err)
+	}
+	if !strings.Contains(string(audioData), "card 1") {
+		t.Fatalf("expected jack config, got %s", string(audioData))
 	}
 }
 
-func TestHandleAudioGetAndUpdate(t *testing.T) {
+func TestHandleConfigurationUploadValidation(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
-	cfg := filepath.Join(tmp, "asound.conf")
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+	})
 
-	original := AudioConfigPath
-	AudioConfigPath = cfg
-	t.Cleanup(func() { AudioConfigPath = original })
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
 
-	// Initially file does not exist -> unknown
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
+	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["25:00"],"video":["08:00"],"rest":[]},"audio":{"output":"invalid"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
-	HandleAudioGet(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var resp APIResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	// Expect object-shaped data
-	dataMap, ok := resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected Data to be object, got %#v", resp.Data)
-	}
-	if dataMap["output"] != "unknown" {
-		t.Fatalf("expected unknown, got %#v", resp.Data)
-	}
 
-	// Update to hdmi
-	body := strings.NewReader(`{"output":"hdmi"}`)
-	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	HandleAudioUpdate(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 on update, got %d", w.Code)
-	}
+	HandleConfigurationUpdate(w, req)
 
-	// Verify get returns hdmi
-	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	HandleAudioGet(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	dataMap, ok = resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected Data to be object, got %#v", resp.Data)
-	}
-	if dataMap["output"] != "hdmi" {
-		t.Fatalf("expected hdmi, got %#v", resp.Data)
-	}
-
-	// Update to jack
-	body = strings.NewReader(`{"output":"jack"}`)
-	req = httptest.NewRequest(http.MethodPut, "/api/menu/audio/update", body)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	HandleAudioUpdate(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 on update, got %d", w.Code)
-	}
-
-	// Verify get returns jack
-	req = httptest.NewRequest(http.MethodGet, "/api/menu/audio/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w = httptest.NewRecorder()
-	HandleAudioGet(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	dataMap, ok = resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected Data to be object, got %#v", resp.Data)
-	}
-	if dataMap["output"] != "jack" {
-		t.Fatalf("expected jack, got %#v", resp.Data)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
 
@@ -570,440 +604,43 @@ func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandleScheduleGetMethodNotAllowed(t *testing.T) {
-	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodPost, "/api/menu/schedule/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleGet(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandleScheduleUpdateMethodNotAllowed(t *testing.T) {
-	ServerKey = "test-key"
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/update", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleUpdate(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
-	}
-}
-
-func TestHandleScheduleGetReturnsTimers(t *testing.T) {
+func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
 	originalPlaylist := PlaylistTimerPath
 	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
-
-	originalCrontabRead := CrontabReadFunc
-	CrontabReadFunc = func() (string, error) {
-		return "", nil
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
 	}
-	t.Cleanup(func() {
-		CrontabReadFunc = originalCrontabRead
-	})
-
-	playlistContent := ` [Unit]
-Description = Playlist upload timer
-
-[Timer]
-OnCalendar=--* 12:32:00
-OnCalendar=--* 16:28:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
-		t.Fatalf("failed to write playlist timer: %v", err)
-	}
-
-	videoContent := `[Unit]
-Description = Video upload timer
-
-[Timer]
-OnCalendar=--* 22:22:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
-		t.Fatalf("failed to write video timer: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleGet(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var resp struct {
-		OK   bool             `json:"ok"`
-		Data ScheduleResponse `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-
-	if !resp.OK {
-		t.Fatalf("expected ok response")
-	}
-
-	expectedPlaylist := []string{"12:32", "16:28"}
-	if !reflect.DeepEqual(expectedPlaylist, resp.Data.Playlist) {
-		t.Fatalf("unexpected playlist timers: %#v", resp.Data.Playlist)
-	}
-
-	expectedVideo := []string{"22:22"}
-	if !reflect.DeepEqual(expectedVideo, resp.Data.Video) {
-		t.Fatalf("unexpected video timers: %#v", resp.Data.Video)
-	}
-
-	if len(resp.Data.Rest) != 0 {
-		t.Fatalf("expected empty rest timers, got %#v", resp.Data.Rest)
-	}
-}
-
-func TestHandleScheduleGetIncludesRestTimes(t *testing.T) {
-	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
-
-	playlistContent := ` [Unit]
-Description = Playlist upload timer
-
-[Timer]
-OnCalendar=--* 12:32:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
-		t.Fatalf("failed to write playlist timer: %v", err)
-	}
-
-	videoContent := `[Unit]
-Description = Video upload timer
-
-[Timer]
-OnCalendar=--* 22:22:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
-		t.Fatalf("failed to write video timer: %v", err)
-	}
-
-	originalCrontabRead := CrontabReadFunc
-	CrontabReadFunc = func() (string, error) {
-		return strings.Join([]string{
-			"# MEDIA_PI_REST STOP",
-			"30 18 * * * sudo systemctl stop play.video.service",
-			"# MEDIA_PI_REST START",
-			"00 09 * * * sudo systemctl start play.video.service",
-		}, "\n") + "\n", nil
-	}
-	t.Cleanup(func() {
-		CrontabReadFunc = originalCrontabRead
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/schedule/get", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleGet(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	var resp struct {
-		OK   bool             `json:"ok"`
-		Data ScheduleResponse `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-
-	if !resp.OK {
-		t.Fatalf("expected ok response")
-	}
-
-	// Service stop at 18:30 = rest starts at 18:30
-	// Service start at 09:00 = rest stops at 09:00
-	expectedRest := []RestTimePair{{Start: "18:30", Stop: "09:00"}}
-	if !reflect.DeepEqual(expectedRest, resp.Data.Rest) {
-		t.Fatalf("unexpected rest schedule: %#v", resp.Data.Rest)
-	}
-}
-
-func TestHandleScheduleUpdateValidation(t *testing.T) {
-	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
-
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(`{"playlist":["25:00"],"video":["08:00"]}`))
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleUpdate(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestHandleScheduleUpdateWritesTimersAndRest(t *testing.T) {
-	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
 
 	originalRead := CrontabReadFunc
 	originalWrite := CrontabWriteFunc
-	t.Cleanup(func() {
-		CrontabReadFunc = originalRead
-		CrontabWriteFunc = originalWrite
-	})
-
-	existing := strings.Join([]string{
-		"5 4 * * * /usr/bin/echo 'hello'",
-		"# MEDIA_PI_REST STOP",
-		"15 20 * * * sudo systemctl stop play.video.service",
-		"# MEDIA_PI_REST START",
-		"45 21 * * * sudo systemctl start play.video.service",
-	}, "\n") + "\n"
-
-	CrontabReadFunc = func() (string, error) {
-		return existing, nil
-	}
-
-	var (
-		writeCalled bool
-		writtenCron string
-	)
-	CrontabWriteFunc = func(content string) error {
-		writeCalled = true
-		writtenCron = content
-		return nil
-	}
-
-	body := `{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleUpdate(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	playlistData, err := os.ReadFile(playlistTimer)
-	if err != nil {
-		t.Fatalf("failed to read playlist timer: %v", err)
-	}
-
-	if !strings.Contains(string(playlistData), "OnCalendar=--* 06:05:00") {
-		t.Fatalf("expected normalized playlist time in file, got %s", string(playlistData))
-	}
-
-	videoData, err := os.ReadFile(videoTimer)
-	if err != nil {
-		t.Fatalf("failed to read video timer: %v", err)
-	}
-
-	if !strings.Contains(string(videoData), "OnCalendar=--* 22:22:00") {
-		t.Fatalf("expected video time in file, got %s", string(videoData))
-	}
-
-	if !writeCalled {
-		t.Fatalf("expected crontab to be written")
-	}
-
-	if strings.Contains(writtenCron, "15 20 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected old rest stop entry to be removed, got %q", writtenCron)
-	}
-
-	if strings.Count(writtenCron, "# MEDIA_PI_REST STOP") != 2 {
-		t.Fatalf("expected two rest stop markers, got %q", writtenCron)
-	}
-
-	if !strings.Contains(writtenCron, "00 12 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected stop entry for 12:00 (rest start), got %q", writtenCron)
-	}
-
-	if !strings.Contains(writtenCron, "00 13 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected start entry for 13:00 (rest stop), got %q", writtenCron)
-	}
-
-	if !strings.Contains(writtenCron, "45 23 * * * sudo systemctl stop play.video.service") {
-		t.Fatalf("expected stop entry for 23:45 (rest start), got %q", writtenCron)
-	}
-
-	if !strings.Contains(writtenCron, "00 07 * * * sudo systemctl start play.video.service") {
-		t.Fatalf("expected start entry for 07:00 (rest stop), got %q", writtenCron)
-	}
-}
-
-func TestHandleScheduleUpdateClearsRest(t *testing.T) {
-	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
-
-	originalRead := CrontabReadFunc
-	originalWrite := CrontabWriteFunc
-	t.Cleanup(func() {
-		CrontabReadFunc = originalRead
-		CrontabWriteFunc = originalWrite
-	})
-
-	existing := strings.Join([]string{
-		"# MEDIA_PI_REST STOP",
-		"15 20 * * * sudo systemctl stop play.video.service",
-		"# MEDIA_PI_REST START",
-		"45 21 * * * sudo systemctl start play.video.service",
-	}, "\n") + "\n"
-
-	CrontabReadFunc = func() (string, error) {
-		return existing, nil
-	}
-
-	var (
-		writeCalled bool
-		writtenCron string
-	)
-	CrontabWriteFunc = func(content string) error {
-		writeCalled = true
-		writtenCron = content
-		return nil
-	}
-
-	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-
-	HandleScheduleUpdate(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	if !writeCalled {
-		t.Fatalf("expected crontab to be written")
-	}
-
-	if strings.Contains(writtenCron, "# MEDIA_PI_REST STOP") || strings.Contains(writtenCron, "# MEDIA_PI_REST START") {
-		t.Fatalf("expected rest markers to be removed, got %q", writtenCron)
-	}
-}
-
-func TestHandleScheduleUpdateRejectsInvalidRestIntervals(t *testing.T) {
-	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	t.Cleanup(func() {
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-	})
-
-	originalRead := CrontabReadFunc
-	originalWrite := CrontabWriteFunc
-	t.Cleanup(func() {
-		CrontabReadFunc = originalRead
-		CrontabWriteFunc = originalWrite
-	})
-
-	CrontabReadFunc = func() (string, error) {
-		return "", nil
-	}
-
+	CrontabReadFunc = func() (string, error) { return "", nil }
 	writeCalled := false
 	CrontabWriteFunc = func(string) error {
 		writeCalled = true
 		return nil
 	}
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
 
-	body := `{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]}`
-	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", strings.NewReader(body))
+	body := `{"playlist":{"source":"/a","destination":"/b"},"schedule":{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]},"audio":{"output":"hdmi"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
 
-	HandleScheduleUpdate(w, req)
+	HandleConfigurationUpdate(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -1018,12 +655,10 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	actions := GetMenuActions()
 
 	expectedIDs := []string{
-		"playlist-get",
-		"playlist-update",
+		"configuration-get",
+		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
-		"schedule-get",
-		"schedule-update",
 	}
 
 	foundIDs := make(map[string]bool)
