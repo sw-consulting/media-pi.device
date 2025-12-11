@@ -111,21 +111,21 @@ func GetMenuActions() []MenuAction {
 		{
 			ID:          "service-status",
 			Name:        "Статус сервисов",
-			Description: "Получить статус сервисов и монтирования",
+			Description: "Получить статус сервисов",
 			Method:      "GET",
 			Path:        "/api/menu/service/status",
 		},
 		{
 			ID:          "configuration-get",
 			Name:        "Получить конфигурацию",
-			Description: "Получить конфигурацию загрузки плейлиста, расписания и аудио",
+			Description: "Получить конфигурацию плейлиста, расписания и аудио",
 			Method:      "GET",
 			Path:        "/api/menu/configuration/get",
 		},
 		{
 			ID:          "configuration-upload",
 			Name:        "Обновить конфигурацию",
-			Description: "Обновить конфигурацию загрузки плейлиста, расписания и аудио",
+			Description: "Обновить конфигурацию плейлиста, расписания и аудио",
 			Method:      "PUT",
 			Path:        "/api/menu/configuration/upload",
 		},
@@ -525,7 +525,7 @@ func readAudioSettings() (AudioSettings, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return AudioSettings{Output: "unknown"}, nil
 		}
-		return AudioSettings{}, fmt.Errorf("Не удалось прочитать конфигурационный файл: %w", err)
+		return AudioSettings{}, fmt.Errorf("не удалось прочитать конфигурационный файл: %w", err)
 	}
 
 	content := string(data)
