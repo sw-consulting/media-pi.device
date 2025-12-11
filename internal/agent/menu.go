@@ -553,6 +553,14 @@ func readAudioSettings() (AudioSettings, error) {
 	}
 }
 
+func validateAudioOutput(output string) error {
+	reqOutput := strings.ToLower(strings.TrimSpace(output))
+	if reqOutput != "hdmi" && reqOutput != "jack" {
+		return fmt.Errorf("output должен быть 'hdmi' или 'jack'")
+	}
+	return nil
+}
+
 func writeAudioSettings(output string) error {
 	reqOutput := strings.ToLower(strings.TrimSpace(output))
 	var config string
@@ -644,6 +652,11 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateRestTimePairs(restPairs); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	if err := validateAudioOutput(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
 	}
