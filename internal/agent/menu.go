@@ -562,6 +562,10 @@ func validateAudioOutput(output string) error {
 }
 
 func writeAudioSettings(output string) error {
+	if err := validateAudioOutput(output); err != nil {
+		return err
+	}
+
 	reqOutput := strings.ToLower(strings.TrimSpace(output))
 	var config string
 	switch reqOutput {
@@ -569,8 +573,6 @@ func writeAudioSettings(output string) error {
 		config = "defaults.pcm.card 0\ndefaults.ctl.card 0\n"
 	case "jack":
 		config = "defaults.pcm.card 1\ndefaults.ctl.card 1\n"
-	default:
-		return fmt.Errorf("output должен быть 'hdmi' или 'jack'")
 	}
 
 	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
