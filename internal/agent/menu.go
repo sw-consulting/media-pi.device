@@ -870,7 +870,6 @@ func handleUploadServiceAction(
 }
 
 // HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
 		"Не удалось запустить загрузку плейлиста: %v",
