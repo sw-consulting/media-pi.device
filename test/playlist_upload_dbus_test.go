@@ -113,7 +113,6 @@ func TestUploadServiceActions_CallsDBus(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
 			rr := httptest.NewRecorder()
 
-			tt := tt // capture range variable
 			tt.handler(rr, req)
 
 			if rr.Result().StatusCode != http.StatusOK {
