@@ -826,7 +826,6 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// HandlePlaylistSelect updates the playlist upload service configuration.
 // handleUploadServiceAction executes shared logic for starting and stopping upload services.
 func handleUploadServiceAction(
 	w http.ResponseWriter,
