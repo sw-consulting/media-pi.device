@@ -324,8 +324,8 @@ WantedBy = multi-user.target
 Description = Playlist upload timer
 
 [Timer]
-OnCalendar=--* 12:32:00
-OnCalendar=--* 16:28:00
+OnCalendar=*-*-* 12:32:00
+OnCalendar=*-*-* 16:28:00
 
 [Install]
 WantedBy=timers.target
@@ -338,7 +338,7 @@ WantedBy=timers.target
 Description = Video upload timer
 
 [Timer]
-OnCalendar=--* 22:22:00
+OnCalendar=*-*-* 22:22:00
 
 [Install]
 WantedBy=timers.target
@@ -481,7 +481,7 @@ WantedBy = multi-user.target
 	if err != nil {
 		t.Fatalf("failed to read playlist timer: %v", err)
 	}
-	if !strings.Contains(string(playlistData), "OnCalendar=--* 06:05:00") {
+	if !strings.Contains(string(playlistData), "OnCalendar=*-*-* 06:05:00") {
 		t.Fatalf("expected normalized playlist time, got %s", string(playlistData))
 	}
 
@@ -489,7 +489,7 @@ WantedBy = multi-user.target
 	if err != nil {
 		t.Fatalf("failed to read video timer: %v", err)
 	}
-	if !strings.Contains(string(videoData), "OnCalendar=--* 22:22:00") {
+	if !strings.Contains(string(videoData), "OnCalendar=*-*-* 22:22:00") {
 		t.Fatalf("expected video time, got %s", string(videoData))
 	}
 
@@ -506,6 +506,28 @@ WantedBy = multi-user.target
 	}
 	if !strings.Contains(string(audioData), "card 1") {
 		t.Fatalf("expected jack config, got %s", string(audioData))
+	}
+}
+
+func TestWriteTimerScheduleProducesValidUnit(t *testing.T) {
+	tmp := t.TempDir()
+	timerFile := filepath.Join(tmp, "test.timer")
+	times := []string{"06:05", "18:30"}
+	if err := writeTimerSchedule(timerFile, "Test timer", "test.service", times); err != nil {
+		t.Fatalf("writeTimerSchedule failed: %v", err)
+	}
+	content, err := os.ReadFile(timerFile)
+	if err != nil {
+		t.Fatalf("failed to read timer file: %v", err)
+	}
+	data := string(content)
+	for _, expected := range []string{"OnCalendar=*-*-* 06:05:00", "OnCalendar=*-*-* 18:30:00"} {
+		if !strings.Contains(data, expected) {
+			t.Fatalf("expected %s in timer file, got %s", expected, data)
+		}
+	}
+	if strings.Contains(data, "User=") {
+		t.Fatalf("timer file must not specify User, got %s", data)
 	}
 }
 

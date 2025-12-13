@@ -1077,7 +1077,7 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		Data: MenuActionResponse{
 			Action:  "schedule-update",
 			Result:  "success",
-			Message: "Расписание обновлений обновлено",
+			Message: "Расписание обновлено",
 		},
 	})
 }
@@ -1088,7 +1088,7 @@ func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
 		start := strings.TrimSpace(pair.Start)
 		stop := strings.TrimSpace(pair.Stop)
 		if start == "" || stop == "" {
-			return nil, errors.New("для каждого интервала отдыха необходимо указать начало и конец")
+			return nil, errors.New("для каждого интервала нерабочего времени необходимо указать начало и конец")
 		}
 		pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
 	}
@@ -1116,18 +1116,18 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 
 		startHour, startMinute, err := parseTimeValue(pair.Start)
 		if err != nil {
-			return fmt.Errorf("ошибка в времени начала отдыха: %v", err)
+			return fmt.Errorf("ошибка в времени начала нерабочего времени: %v", err)
 		}
 		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
 		if err != nil {
-			return fmt.Errorf("ошибка в времени окончания отдыха: %v", err)
+			return fmt.Errorf("ошибка в времени окончания нерабочего времени: %v", err)
 		}
 
 		startMin := startHour*60 + startMinute
 		stopMin := stopHour*60 + stopMinute
 
 		if startMin == stopMin {
-			return errors.New("интервал отдыха не может иметь нулевую длительность")
+			return errors.New("интервал нерабочего времени не может иметь нулевую длительность")
 		}
 
 		intervals = append(intervals, restInterval{
@@ -1171,7 +1171,7 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 
 				// Check if intervals overlap
 				if intervalsOverlap(currentStart, currentStop, otherStart, otherStop) {
-					return errors.New("интервалы отдыха не должны пересекаться")
+					return errors.New("интервалы нерабочего времени не должны пересекаться")
 				}
 			}
 		}
@@ -1188,7 +1188,7 @@ func validateRestTimePairs(pairs []RestTimePair) error {
 			}
 
 			if intervalsOverlap(currentStart, currentStop, otherNextDayStart, otherNextDayStop) {
-				return errors.New("интервалы отдыха не должны пересекаться через границу суток")
+				return errors.New("интервалы нерабочего времени не должны пересекаться через границу суток")
 			}
 		}
 	}
@@ -1550,8 +1550,10 @@ func extractTimeFromOnCalendar(line string) (string, bool) {
 		return "", false
 	}
 
-	if strings.HasPrefix(value, "--*") {
-		value = strings.TrimSpace(strings.TrimPrefix(value, "--*"))
+	for _, prefix := range []string{"--*", "*-*-*"} {
+		if strings.HasPrefix(value, prefix) {
+			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+		}
 	}
 
 	if value == "" {
@@ -1560,7 +1562,7 @@ func extractTimeFromOnCalendar(line string) (string, bool) {
 
 	fields := strings.Fields(value)
 	if len(fields) > 0 {
-		value = fields[0]
+		value = fields[len(fields)-1]
 	}
 
 	parts := strings.Split(value, ":")
@@ -1620,14 +1622,13 @@ func writeTimerSchedule(filePath, description, unit string, times []string) erro
 
 	var builder strings.Builder
 	builder.WriteString("[Unit]\n")
-	builder.WriteString(fmt.Sprintf("Description = %s\n\n", sanitizedDescription))
+	builder.WriteString(fmt.Sprintf("Description=%s\n\n", sanitizedDescription))
 	builder.WriteString("[Timer]\n")
 	for _, t := range times {
-		builder.WriteString(fmt.Sprintf("OnCalendar=--* %s:00\n", t))
+		builder.WriteString(fmt.Sprintf("OnCalendar=*-*-* %s:00\n", t))
 	}
 	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
-	builder.WriteString("Persistent=true\n")
-	builder.WriteString(fmt.Sprintf("User=%s\n\n", MediaPiServiceUser))
+	builder.WriteString("Persistent=true\n\n")
 	builder.WriteString("[Install]\n")
 	builder.WriteString("WantedBy=timers.target\n")
 
