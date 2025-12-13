@@ -1551,8 +1551,8 @@ func extractTimeFromOnCalendar(line string) (string, bool) {
 	}
 
 	for _, prefix := range []string{"--*", "*-*-*"} {
-		if strings.HasPrefix(value, prefix) {
-			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
+		if after, ok := strings.CutPrefix(value, prefix); ok {
+			value = strings.TrimSpace(after)
 		}
 	}
 
