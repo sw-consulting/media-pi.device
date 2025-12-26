@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"gopkg.in/yaml.v3"
 )
 
 // Configurable paths for timer and service files. Tests may override these to point to
@@ -32,6 +33,11 @@ var (
 // AudioConfigPath is the path to the ALSA config file controlling audio output.
 // Tests may override this to point to a temp file.
 var AudioConfigPath = "/etc/asound.conf"
+
+// ConfigurationSnapshotPath is the path where the aggregated configuration
+// snapshot is persisted after configuration-get or configuration-update.
+// Tests may override this to point to a temp file.
+var ConfigurationSnapshotPath = "/etc/media-pi-agent/config.yaml"
 
 // RebootAction and PowerOffAction are package-level hooks used to perform
 // system reboot and power-off. Tests can replace these with stubs to avoid
@@ -184,27 +190,27 @@ func GetMenuActions() []MenuAction {
 // PlaylistUploadConfig represents the relevant configuration extracted from
 // playlist.upload.service.
 type PlaylistUploadConfig struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
+	Source      string `json:"source" yaml:"source"`
+	Destination string `json:"destination" yaml:"destination"`
 }
 
 // ScheduleSettings represents playlist/video timer settings and optional rest periods.
 type ScheduleSettings struct {
-	Playlist []string       `json:"playlist"`
-	Video    []string       `json:"video"`
-	Rest     []RestTimePair `json:"rest,omitempty"`
+	Playlist []string       `json:"playlist" yaml:"playlist"`
+	Video    []string       `json:"video" yaml:"video"`
+	Rest     []RestTimePair `json:"rest,omitempty" yaml:"rest,omitempty"`
 }
 
 // AudioSettings describes the selected audio output.
 type AudioSettings struct {
-	Output string `json:"output"`
+	Output string `json:"output" yaml:"output"`
 }
 
 // ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
 type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
+	Playlist PlaylistUploadConfig `json:"playlist" yaml:"playlist"`
+	Schedule ScheduleSettings     `json:"schedule" yaml:"schedule"`
+	Audio    AudioSettings        `json:"audio" yaml:"audio"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -578,6 +584,23 @@ func writeAudioSettings(output string) error {
 	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
 }
 
+func persistConfigurationSettings(settings ConfigurationSettings) error {
+	if err := os.MkdirAll(filepath.Dir(ConfigurationSnapshotPath), 0755); err != nil {
+		return fmt.Errorf("не удалось создать директорию конфигурации: %w", err)
+	}
+
+	data, err := yaml.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("не удалось сериализовать конфигурацию: %w", err)
+	}
+
+	if err := os.WriteFile(ConfigurationSnapshotPath, data, 0644); err != nil {
+		return fmt.Errorf("не удалось записать конфигурацию: %w", err)
+	}
+
+	return nil
+}
+
 // HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
 func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -615,11 +638,18 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
+	settings := ConfigurationSettings{
 		Playlist: playlistCfg,
 		Schedule: ScheduleSettings{Playlist: playlistTimers, Video: videoTimers, Rest: restTimes},
 		Audio:    audioSettings,
-	}})
+	}
+
+	if err := persistConfigurationSettings(settings); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: settings})
 }
 
 // HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
@@ -697,6 +727,16 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := writeAudioSettings(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	settings := ConfigurationSettings{
+		Playlist: PlaylistUploadConfig{Source: playlistSource, Destination: playlistDestination},
+		Schedule: ScheduleSettings{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restPairs},
+		Audio:    AudioSettings{Output: strings.ToLower(strings.TrimSpace(req.Audio.Output))},
+	}
+	if err := persistConfigurationSettings(settings); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
 	}
 
@@ -823,8 +863,8 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 // Start is when the rest period begins (service stops)
 // Stop is when the rest period ends (service starts)
 type RestTimePair struct {
-	Start string `json:"start"` // When rest begins (service stops)
-	Stop  string `json:"stop"`  // When rest ends (service starts)
+	Start string `json:"start" yaml:"start"` // When rest begins (service stops)
+	Stop  string `json:"stop" yaml:"stop"`   // When rest ends (service starts)
 }
 
 // ScheduleResponse represents the current update schedule.

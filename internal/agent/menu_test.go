@@ -14,6 +14,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestHandleMenuList(t *testing.T) {
@@ -293,20 +295,24 @@ func TestHandleConfigurationGet(t *testing.T) {
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 	audioPath := filepath.Join(tmp, "asound.conf")
+	configSnapshot := filepath.Join(tmp, "config.yaml")
 
 	originalServicePath := PlaylistServicePath
 	originalPlaylist := PlaylistTimerPath
 	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
+	originalSnapshot := ConfigurationSnapshotPath
 	PlaylistServicePath = servicePath
 	PlaylistTimerPath = playlistTimer
 	VideoTimerPath = videoTimer
 	AudioConfigPath = audioPath
+	ConfigurationSnapshotPath = configSnapshot
 	t.Cleanup(func() {
 		PlaylistServicePath = originalServicePath
 		PlaylistTimerPath = originalPlaylist
 		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
+		ConfigurationSnapshotPath = originalSnapshot
 	})
 
 	serviceContent := `[Unit]
@@ -403,6 +409,20 @@ WantedBy=timers.target
 	if resp.Data.Audio.Output != "hdmi" {
 		t.Fatalf("expected hdmi output, got %s", resp.Data.Audio.Output)
 	}
+
+	snapshotData, err := os.ReadFile(configSnapshot)
+	if err != nil {
+		t.Fatalf("failed to read config snapshot: %v", err)
+	}
+
+	var snapshot ConfigurationSettings
+	if err := yaml.Unmarshal(snapshotData, &snapshot); err != nil {
+		t.Fatalf("failed to unmarshal config snapshot: %v", err)
+	}
+
+	if !reflect.DeepEqual(snapshot, resp.Data) {
+		t.Fatalf("snapshot mismatch: %+v", snapshot)
+	}
 }
 
 func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
@@ -413,20 +433,24 @@ func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
 	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
 	videoTimer := filepath.Join(tmp, "video.upload.timer")
 	audioPath := filepath.Join(tmp, "asound.conf")
+	configSnapshot := filepath.Join(tmp, "config.yaml")
 
 	originalServicePath := PlaylistServicePath
 	originalPlaylist := PlaylistTimerPath
 	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
+	originalSnapshot := ConfigurationSnapshotPath
 	PlaylistServicePath = servicePath
 	PlaylistTimerPath = playlistTimer
 	VideoTimerPath = videoTimer
 	AudioConfigPath = audioPath
+	ConfigurationSnapshotPath = configSnapshot
 	t.Cleanup(func() {
 		PlaylistServicePath = originalServicePath
 		PlaylistTimerPath = originalPlaylist
 		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
+		ConfigurationSnapshotPath = originalSnapshot
 	})
 
 	serviceContent := `[Unit]
@@ -506,6 +530,32 @@ WantedBy = multi-user.target
 	}
 	if !strings.Contains(string(audioData), "card 1") {
 		t.Fatalf("expected jack config, got %s", string(audioData))
+	}
+
+	snapshotData, err := os.ReadFile(configSnapshot)
+	if err != nil {
+		t.Fatalf("failed to read config snapshot: %v", err)
+	}
+
+	var snapshot ConfigurationSettings
+	if err := yaml.Unmarshal(snapshotData, &snapshot); err != nil {
+		t.Fatalf("failed to unmarshal config snapshot: %v", err)
+	}
+
+	if snapshot.Playlist.Source != "/mnt/ya.disk/playlist/test/" || snapshot.Playlist.Destination != "/mnt/usb/playlist/" {
+		t.Fatalf("unexpected snapshot playlist: %+v", snapshot.Playlist)
+	}
+	if !reflect.DeepEqual(snapshot.Schedule.Playlist, []string{"06:05", "16:28"}) {
+		t.Fatalf("unexpected snapshot playlist schedule: %+v", snapshot.Schedule.Playlist)
+	}
+	if !reflect.DeepEqual(snapshot.Schedule.Video, []string{"22:22"}) {
+		t.Fatalf("unexpected snapshot video schedule: %+v", snapshot.Schedule.Video)
+	}
+	if !reflect.DeepEqual(snapshot.Schedule.Rest, []RestTimePair{{Start: "12:00", Stop: "13:00"}, {Start: "23:45", Stop: "07:00"}}) {
+		t.Fatalf("unexpected snapshot rest schedule: %+v", snapshot.Schedule.Rest)
+	}
+	if snapshot.Audio.Output != "jack" {
+		t.Fatalf("unexpected snapshot audio output: %s", snapshot.Audio.Output)
 	}
 }
 

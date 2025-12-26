@@ -142,6 +142,13 @@ if systemctl is-active --quiet media-pi-agent.service; then
   else
     echo "⚠ Warning: REST API not responding on port ${AGENT_PORT}"
   fi
+
+  echo "Generating configuration snapshot..."
+  if ! curl -sSf -H "Authorization: Bearer ${SERVER_KEY}" \
+    "http://localhost:${AGENT_PORT}/api/menu/configuration/get" >/dev/null; then
+    echo "✗ Error: Failed to generate configuration snapshot" >&2
+    exit 1
+  fi
 else
   echo "✗ Error: Media Pi Agent service failed to start" >&2
   systemctl status media-pi-agent.service >&2
