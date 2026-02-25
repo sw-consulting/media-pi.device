@@ -146,7 +146,9 @@ func TestFetchManifest(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(manifest)
+		if err := json.NewEncoder(w).Encode(manifest); err != nil {
+			t.Errorf("failed to encode manifest: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -209,7 +211,9 @@ func TestDownloadFile(t *testing.T) {
 			return
 		}
 
-		w.Write(content)
+		if _, err := w.Write(content); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -255,7 +259,9 @@ func TestDownloadFile_SizeMismatch(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(content)
+		if _, err := w.Write(content); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -287,7 +293,9 @@ func TestDownloadFile_HashMismatch(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(content)
+		if _, err := w.Write(content); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 

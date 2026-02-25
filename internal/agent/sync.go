@@ -151,7 +151,11 @@ func fetchManifest(ctx context.Context) ([]ManifestItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -186,7 +190,11 @@ func downloadFile(ctx context.Context, item ManifestItem, destPath string) error
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Warning: failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -199,8 +207,12 @@ func downloadFile(ctx context.Context, item ManifestItem, destPath string) error
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		tempFile.Close()
-		os.Remove(tempPath) // Clean up on error
+		if err := tempFile.Close(); err != nil {
+			log.Printf("Warning: failed to close temp file: %v", err)
+		}
+		if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: failed to clean up temp file: %v", err)
+		}
 	}()
 
 	// Download and compute hash simultaneously
@@ -250,7 +262,11 @@ func verifyLocalFile(path string, item ManifestItem) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("Warning: failed to close file: %v", err)
+		}
+	}()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {

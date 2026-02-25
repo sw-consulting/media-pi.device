@@ -845,49 +845,6 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// handleUploadServiceAction executes shared logic for starting and stopping upload services.
-func handleUploadServiceAction(
-	w http.ResponseWriter,
-	r *http.Request,
-	unit string,
-	actionID string,
-	errMsg string,
-	timeoutMsg string,
-	successMsg string,
-	action func(context.Context, DBusConnection, chan string, string) error,
-) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	if err := action(ctx, conn, ch, unit); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf(errMsg, err)})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: timeoutMsg})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
-}
-
 // HandlePlaylistStartUpload starts the in-agent sync scheduler.
 // This replaces the old playlist.upload.service D-Bus interaction.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
@@ -1716,12 +1673,12 @@ func writeTimerSchedule(filePath, description, unit string, times []string) erro
 
 	var builder strings.Builder
 	builder.WriteString("[Unit]\n")
-	builder.WriteString(fmt.Sprintf("Description=%s\n\n", sanitizedDescription))
+	fmt.Fprintf(&builder, "Description=%s\n\n", sanitizedDescription)
 	builder.WriteString("[Timer]\n")
 	for _, t := range times {
-		builder.WriteString(fmt.Sprintf("OnCalendar=*-*-* %s:00\n", t))
+		fmt.Fprintf(&builder, "OnCalendar=*-*-* %s:00\n", t)
 	}
-	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
+	fmt.Fprintf(&builder, "Unit=%s\n", sanitizedUnit)
 	builder.WriteString("Persistent=true\n\n")
 	builder.WriteString("[Install]\n")
 	builder.WriteString("WantedBy=timers.target\n")

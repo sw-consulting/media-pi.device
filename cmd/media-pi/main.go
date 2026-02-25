@@ -122,7 +122,9 @@ func main() {
 			case syscall.SIGINT, syscall.SIGTERM:
 				log.Printf("received %v, shutting down", sig)
 				cancel() // Stop sync scheduler
-				server.Close()
+				if err := server.Close(); err != nil {
+					log.Printf("Error closing server: %v", err)
+				}
 				os.Exit(0)
 			}
 		}
