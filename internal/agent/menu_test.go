@@ -97,8 +97,7 @@ func TestGetMenuActions(t *testing.T) {
 		"service-status",
 		"configuration-get",
 		"configuration-update",
-		"playlist-start-upload",
-		"playlist-stop-upload",
+		"sync-start", // New sync action replaces upload actions
 		"system-reload",
 		"system-reboot",
 		"system-shutdown",
@@ -615,10 +614,7 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	expectedIDs := []string{
 		"configuration-get",
 		"configuration-update",
-		"playlist-start-upload",
-		"playlist-stop-upload",
-		"video-start-upload",
-		"video-stop-upload",
+		"sync-start", // New sync action replaces upload actions
 	}
 
 	foundIDs := make(map[string]bool)
@@ -629,6 +625,19 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	for _, expectedID := range expectedIDs {
 		if !foundIDs[expectedID] {
 			t.Errorf("expected action ID %q not found in menu actions", expectedID)
+		}
+	}
+	
+	// Verify upload actions are NOT in the menu anymore
+	removedIDs := []string{
+		"playlist-start-upload",
+		"playlist-stop-upload",
+		"video-start-upload",
+		"video-stop-upload",
+	}
+	for _, removedID := range removedIDs {
+		if foundIDs[removedID] {
+			t.Errorf("obsolete action ID %q should not be in menu actions", removedID)
 		}
 	}
 }
