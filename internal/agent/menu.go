@@ -21,14 +21,6 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// Configurable paths for timer and service files. Tests may override these to point to
-// temporary locations to avoid requiring root file system access.
-var (
-	PlaylistTimerPath   = "/etc/systemd/system/playlist.upload.timer"
-	VideoTimerPath      = "/etc/systemd/system/video.upload.timer"
-	PlaylistServicePath = "/etc/systemd/system/playlist.upload.service"
-)
-
 // AudioConfigPath is the path to the ALSA config file controlling audio output.
 // Tests may override this to point to a temp file.
 var AudioConfigPath = "/etc/asound.conf"
@@ -130,34 +122,6 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/configuration/update",
 		},
 		{
-			ID:          "playlist-start-upload",
-			Name:        "Начать загрузку плейлиста",
-			Description: "Запустить сервис загрузки плейлистов",
-			Method:      "POST",
-			Path:        "/api/menu/playlist/start-upload",
-		},
-		{
-			ID:          "playlist-stop-upload",
-			Name:        "Остановить загрузку плейлиста",
-			Description: "Остановить сервис загрузки плейлистов",
-			Method:      "POST",
-			Path:        "/api/menu/playlist/stop-upload",
-		},
-		{
-			ID:          "video-start-upload",
-			Name:        "Начать загрузку видео",
-			Description: "Запустить сервис загрузки видео",
-			Method:      "POST",
-			Path:        "/api/menu/video/start-upload",
-		},
-		{
-			ID:          "video-stop-upload",
-			Name:        "Остановить загрузку видео",
-			Description: "Остановить сервис загрузки видео",
-			Method:      "POST",
-			Path:        "/api/menu/video/stop-upload",
-		},
-		{
 			ID:          "system-reload",
 			Name:        "Применить изменения",
 			Description: "Перезагрузить конфигурацию systemd",
@@ -181,13 +145,6 @@ func GetMenuActions() []MenuAction {
 	}
 }
 
-// PlaylistUploadConfig represents the relevant configuration extracted from
-// playlist.upload.service.
-type PlaylistUploadConfig struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
-}
-
 // ScheduleSettings represents playlist/video timer settings and optional rest periods.
 type ScheduleSettings struct {
 	Playlist []string       `json:"playlist"`
@@ -200,20 +157,28 @@ type AudioSettings struct {
 	Output string `json:"output"`
 }
 
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+// PlaylistConfig represents playlist source and destination configuration.
+// Note: This is now deprecated but kept for backward compatibility with
+// existing configuration files. Video synchronization is now handled
+// by the sync scheduler.
+type PlaylistConfig struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
+// ConfigurationSettings aggregates playlist configuration, schedule and audio output.
 type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
+	Playlist PlaylistConfig   `json:"playlist"`
+	Schedule ScheduleSettings `json:"schedule"`
+	Audio    AudioSettings    `json:"audio"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
 // service-status endpoint.
 type ServiceStatusResponse struct {
-	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
-	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
-	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
-	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
+	PlaybackServiceStatus bool       `json:"playbackServiceStatus"`
+	YaDiskMountStatus     bool       `json:"yaDiskMountStatus"`
+	SyncStatus            SyncStatus `json:"syncStatus"`
 }
 
 // HandleMenuList returns the list of available menu actions.
@@ -427,110 +392,12 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ServiceStatusResponse{
-		PlaybackServiceStatus:       checkUnit("play.video.service"),
-		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
-		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
-		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
+		PlaybackServiceStatus: checkUnit("play.video.service"),
+		YaDiskMountStatus:     isPathMounted("/mnt/ya.disk"),
+		SyncStatus:            GetSyncStatus(),
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})
-}
-
-// readPlaylistUploadConfig parses the playlist upload service file and returns
-// the configured source and destination paths.
-func readPlaylistUploadConfig(path string) (PlaylistUploadConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return PlaylistUploadConfig{}, err
-	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "ExecStart=") && !strings.HasPrefix(trimmed, "ExecStart ") {
-			continue
-		}
-
-		eqIdx := strings.Index(line, "=")
-		if eqIdx == -1 {
-			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит '='")
-		}
-
-		commandWithComment := strings.TrimSpace(line[eqIdx+1:])
-		if hashIdx := strings.Index(commandWithComment, "#"); hashIdx != -1 {
-			commandWithComment = strings.TrimSpace(commandWithComment[:hashIdx])
-		}
-		fields := strings.Fields(commandWithComment)
-		if len(fields) < 2 {
-			return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
-		}
-
-		return PlaylistUploadConfig{
-			Source:      fields[len(fields)-2],
-			Destination: fields[len(fields)-1],
-		}, nil
-	}
-
-	if err := scanner.Err(); err != nil {
-		return PlaylistUploadConfig{}, err
-	}
-
-	return PlaylistUploadConfig{}, fmt.Errorf("строка ExecStart не найдена")
-}
-
-// writePlaylistUploadConfig updates the ExecStart line in the playlist upload
-// service file, preserving other parts of the file intact while replacing the
-// source and destination paths.
-func writePlaylistUploadConfig(path, source, destination string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	updated := false
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "ExecStart=") && !strings.HasPrefix(trimmed, "ExecStart ") {
-			continue
-		}
-
-		eqIdx := strings.Index(line, "=")
-		if eqIdx == -1 {
-			return fmt.Errorf("строка ExecStart не содержит '='")
-		}
-
-		commandWithComment := strings.TrimSpace(line[eqIdx+1:])
-		comment := ""
-		if hashIdx := strings.Index(commandWithComment, "#"); hashIdx != -1 {
-			comment = strings.TrimSpace(commandWithComment[hashIdx:])
-			commandWithComment = strings.TrimSpace(commandWithComment[:hashIdx])
-		}
-		fields := strings.Fields(commandWithComment)
-		if len(fields) < 2 {
-			return fmt.Errorf("строка ExecStart не содержит пути источника и назначения")
-		}
-
-		prefixFields := append([]string{}, fields[:len(fields)-2]...)
-		prefixFields = append(prefixFields, source, destination)
-
-		newCommand := strings.Join(prefixFields, " ")
-		if comment != "" {
-			newCommand = fmt.Sprintf("%s %s", newCommand, comment)
-		}
-		lhs := strings.TrimSpace(line[:eqIdx])
-		lines[i] = fmt.Sprintf("%s = %s", lhs, newCommand)
-		updated = true
-		break
-	}
-
-	if !updated {
-		return fmt.Errorf("строка ExecStart не найдена")
-	}
-
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 func readAudioSettings() (AudioSettings, error) {
@@ -578,28 +445,11 @@ func writeAudioSettings(output string) error {
 	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
 }
 
-// HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
+// HandleConfigurationGet returns schedule and audio configuration.
+// Note: Playlist upload configuration is deprecated and returns empty values.
 func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
-	playlistCfg, err := readPlaylistUploadConfig(PlaylistServicePath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err)})
-		return
-	}
-
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err)})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err)})
 		return
 	}
 
@@ -615,14 +465,16 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Return empty playlist/schedule for backward compatibility
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
-		Playlist: playlistCfg,
-		Schedule: ScheduleSettings{Playlist: playlistTimers, Video: videoTimers, Rest: restTimes},
+		Playlist: PlaylistConfig{},
+		Schedule: ScheduleSettings{Playlist: []string{}, Video: []string{}, Rest: restTimes},
 		Audio:    audioSettings,
 	}})
 }
 
-// HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
+// HandleConfigurationUpdate updates rest schedule and audio output.
+// Note: Playlist and video upload configuration is deprecated and ignored.
 func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
@@ -635,18 +487,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playlistSource := strings.TrimSpace(req.Playlist.Source)
-	playlistDestination := strings.TrimSpace(req.Playlist.Destination)
-	if playlistSource == "" || playlistDestination == "" {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поля source и destination обязательны"})
-		return
-	}
-
-	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный формат времени. Используйте HH:MM"})
-		return
-	}
-
+	// Validate and sanitize rest times
 	restPairs, err := sanitizeRestPairs(req.Schedule.Rest)
 	if err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
@@ -658,43 +499,19 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate audio output
 	if err := validateAudioOutput(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
 	}
 
-	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки плейлиста: %v", err)})
-		return
-	}
-
-	normalizedVideo, err := normalizeTimes(req.Schedule.Video)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки видео: %v", err)})
-		return
-	}
-
-	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, playlistDestination); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err)})
-		return
-	}
-
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err)})
-		return
-	}
-
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err)})
-		return
-	}
-
+	// Update rest times in crontab
 	if err := updateRestTimes(restPairs); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err)})
 		return
 	}
 
+	// Update audio settings
 	if err := writeAudioSettings(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
@@ -834,128 +651,21 @@ type ScheduleResponse struct {
 	Rest     []RestTimePair `json:"rest,omitempty"`
 }
 
-// ScheduleUpdateRequest represents the request to update timers for playlist and video uploads.
+// ScheduleUpdateRequest represents the request to update rest times.
+// Note: Playlist and video fields are deprecated and ignored.
 type ScheduleUpdateRequest struct {
-	Playlist []string        `json:"playlist"`
-	Video    []string        `json:"video"`
+	Playlist []string        `json:"playlist"` // Deprecated
+	Video    []string        `json:"video"`    // Deprecated
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// handleUploadServiceAction executes shared logic for starting and stopping upload services.
-func handleUploadServiceAction(
-	w http.ResponseWriter,
-	r *http.Request,
-	unit string,
-	actionID string,
-	errMsg string,
-	timeoutMsg string,
-	successMsg string,
-	action func(context.Context, DBusConnection, chan string, string) error,
-) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	if err := action(ctx, conn, ch, unit); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf(errMsg, err)})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: timeoutMsg})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
-}
-
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
-func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
-		"Не удалось запустить загрузку плейлиста: %v",
-		"Таймаут запуска сервиса загрузки плейлиста",
-		"Загрузка плейлиста запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
-}
-
-// HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
-func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-stop-upload",
-		"Не удалось остановить загрузку плейлиста: %v",
-		"Таймаут остановки сервиса загрузки плейлиста",
-		"Загрузка плейлиста остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
-}
-
-// HandleVideoStartUpload starts the video.upload.service via D-Bus.
-func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-start-upload",
-		"Не удалось запустить загрузку видео: %v",
-		"Таймаут запуска сервиса загрузки видео",
-		"Загрузка видео запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
-}
-
-// HandleVideoStopUpload stops the video.upload.service via D-Bus.
-func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-stop-upload",
-		"Не удалось остановить загрузку видео: %v",
-		"Таймаут остановки сервиса загрузки видео",
-		"Загрузка видео остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
-}
-
-// HandleScheduleGet returns the configured update timers for playlist and video uploads.
+// HandleScheduleGet returns the rest schedule configuration.
+// Note: Playlist and video upload timers are deprecated and return empty arrays.
 func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
 			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err),
 		})
 		return
 	}
@@ -969,17 +679,19 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Return empty playlist/video arrays for backward compatibility
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: ScheduleResponse{
-			Playlist: playlistTimers,
-			Video:    videoTimers,
+			Playlist: []string{},
+			Video:    []string{},
 			Rest:     restTimes,
 		},
 	})
 }
 
-// HandleScheduleUpdate updates the playlist and video timer configurations.
+// HandleScheduleUpdate updates the rest schedule configuration.
+// Note: Playlist and video fields are deprecated and ignored.
 func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
@@ -994,14 +706,6 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{
 			OK:     false,
 			ErrMsg: "Неверный JSON в теле запроса",
-		})
-		return
-	}
-
-	if hasInvalidTimes(req.Playlist, req.Video) {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный формат времени. Используйте HH:MM",
 		})
 		return
 	}
@@ -1028,48 +732,12 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		restPairs = pairs
 	}
 
-	normalizedPlaylist, err := normalizeTimes(req.Playlist)
-	if err != nil {
+	if err := updateRestTimes(restPairs); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
 		})
 		return
-	}
-
-	normalizedVideo, err := normalizeTimes(req.Video)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err),
-		})
-		return
-	}
-
-	if req.Rest != nil {
-		if err := updateRestTimes(restPairs); err != nil {
-			JSONResponse(w, http.StatusInternalServerError, APIResponse{
-				OK:     false,
-				ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
-			})
-			return
-		}
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
@@ -1514,79 +1182,6 @@ func parseHourMinute(timeStr string) (int, int, error) {
 	return hour, minute, nil
 }
 
-func readTimerSchedule(filePath string) ([]string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	var timers []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "OnCalendar=") {
-			if timeStr, ok := extractTimeFromOnCalendar(line); ok {
-				timers = append(timers, timeStr)
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return timers, nil
-}
-
-func extractTimeFromOnCalendar(line string) (string, bool) {
-	value := strings.TrimSpace(strings.TrimPrefix(line, "OnCalendar="))
-	if value == "" {
-		return "", false
-	}
-
-	for _, prefix := range []string{"--*", "*-*-*"} {
-		if after, ok := strings.CutPrefix(value, prefix); ok {
-			value = strings.TrimSpace(after)
-		}
-	}
-
-	if value == "" {
-		return "", false
-	}
-
-	fields := strings.Fields(value)
-	if len(fields) > 0 {
-		value = fields[len(fields)-1]
-	}
-
-	parts := strings.Split(value, ":")
-	if len(parts) < 2 {
-		return "", false
-	}
-
-	hour, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return "", false
-	}
-
-	minute, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return "", false
-	}
-
-	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-		return "", false
-	}
-
-	return fmt.Sprintf("%02d:%02d", hour, minute), true
-}
-
 // SanitizeSystemdValue sanitizes a string value for use in systemd unit files.
 // It removes or replaces characters that could break the unit file format or
 // be used for injection attacks, particularly newlines and carriage returns.
@@ -1609,30 +1204,6 @@ func SanitizeSystemdValue(value string) string {
 
 	// Trim leading/trailing whitespace that might have been introduced
 	return strings.TrimSpace(result)
-}
-
-func writeTimerSchedule(filePath, description, unit string, times []string) error {
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-		return err
-	}
-
-	// Sanitize description and unit to prevent injection attacks
-	sanitizedDescription := SanitizeSystemdValue(description)
-	sanitizedUnit := SanitizeSystemdValue(unit)
-
-	var builder strings.Builder
-	builder.WriteString("[Unit]\n")
-	builder.WriteString(fmt.Sprintf("Description=%s\n\n", sanitizedDescription))
-	builder.WriteString("[Timer]\n")
-	for _, t := range times {
-		builder.WriteString(fmt.Sprintf("OnCalendar=*-*-* %s:00\n", t))
-	}
-	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
-	builder.WriteString("Persistent=true\n\n")
-	builder.WriteString("[Install]\n")
-	builder.WriteString("WantedBy=timers.target\n")
-
-	return os.WriteFile(filePath, []byte(builder.String()), 0644)
 }
 
 // isValidTimeFormat checks if a string is in HH:MM format.
