@@ -97,8 +97,6 @@ func TestGetMenuActions(t *testing.T) {
 		"service-status",
 		"configuration-get",
 		"configuration-update",
-		"playlist-start-upload",
-		"playlist-stop-upload",
 		"system-reload",
 		"system-reboot",
 		"system-shutdown",
@@ -129,6 +127,20 @@ func TestGetMenuActions(t *testing.T) {
 	for _, expectedID := range expectedIDs {
 		if !foundIDs[expectedID] {
 			t.Errorf("expected action ID %q not found", expectedID)
+		}
+	}
+	
+	// Ensure upload actions are NOT in the list
+	uploadIDs := []string{
+		"playlist-start-upload",
+		"playlist-stop-upload",
+		"video-start-upload",
+		"video-stop-upload",
+	}
+	
+	for _, uploadID := range uploadIDs {
+		if foundIDs[uploadID] {
+			t.Errorf("deprecated upload action ID %q should not be in menu actions", uploadID)
 		}
 	}
 }
@@ -229,13 +241,10 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	if resp.Data.PlaybackServiceStatus != true {
 		t.Fatalf("expected playback service to be active, got %v", resp.Data.PlaybackServiceStatus)
 	}
-	if resp.Data.PlaylistUploadServiceStatus != false {
-		t.Fatalf("expected playlist upload service to be inactive, got %v", resp.Data.PlaylistUploadServiceStatus)
-	}
-	if resp.Data.VideoUploadServiceStatus != true {
-		t.Fatalf("expected video upload service to be active, got %v", resp.Data.VideoUploadServiceStatus)
-	}
-
+	
+	// Check sync status is present (not checking upload statuses anymore)
+	// Sync status will be empty/default values since no actual sync has run
+	
 	// Ensure the mount detection reads our temp mounts file
 	if resp.Data.YaDiskMountStatus != true {
 		t.Fatalf("expected ya disk to be reported mounted, got %v", resp.Data.YaDiskMountStatus)
@@ -243,16 +252,12 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 }
 
 // noopDBusConnectionForStatus is a test helper that reports ActiveState=active
-// for play.video.service and inactive for playlist.upload.service.
+// for play.video.service.
 type noopDBusConnectionForStatus struct{ noopDBusConnection }
 
 func (n *noopDBusConnectionForStatus) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
 	switch unit {
 	case "play.video.service":
-		return map[string]any{"ActiveState": "active"}, nil
-	case "playlist.upload.service":
-		return map[string]any{"ActiveState": "inactive"}, nil
-	case "video.upload.service":
 		return map[string]any{"ActiveState": "active"}, nil
 	default:
 		return map[string]any{"ActiveState": "inactive"}, nil
@@ -289,63 +294,13 @@ func TestHandleConfigurationGet(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
-	servicePath := filepath.Join(tmp, "playlist.upload.service")
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
 	audioPath := filepath.Join(tmp, "asound.conf")
 
-	originalServicePath := PlaylistServicePath
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
-	PlaylistServicePath = servicePath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
 	AudioConfigPath = audioPath
 	t.Cleanup(func() {
-		PlaylistServicePath = originalServicePath
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
 	})
-
-	serviceContent := `[Unit]
-Description = Rsync playlist upload service
-[Service]
-ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
-[Install]
-WantedBy = multi-user.target
-`
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
-		t.Fatalf("failed to write service file: %v", err)
-	}
-
-	playlistContent := `[Unit]
-Description = Playlist upload timer
-
-[Timer]
-OnCalendar=*-*-* 12:32:00
-OnCalendar=*-*-* 16:28:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
-		t.Fatalf("failed to write playlist timer: %v", err)
-	}
-
-	videoContent := `[Unit]
-Description = Video upload timer
-
-[Timer]
-OnCalendar=*-*-* 22:22:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
-		t.Fatalf("failed to write video timer: %v", err)
-	}
 
 	if err := os.WriteFile(audioPath, []byte("defaults.pcm.card 0\n"), 0644); err != nil {
 		t.Fatalf("failed to write audio config: %v", err)
@@ -384,14 +339,15 @@ WantedBy=timers.target
 		t.Fatalf("expected OK response, got %+v", resp.Data)
 	}
 
-	if resp.Data.Playlist.Source != "/mnt/src/playlist/" || resp.Data.Playlist.Destination != "/mnt/dst/playlist/" {
-		t.Fatalf("unexpected playlist config: %+v", resp.Data.Playlist)
+	// Playlist and video should be empty (deprecated)
+	if resp.Data.Playlist.Source != "" || resp.Data.Playlist.Destination != "" {
+		t.Fatalf("expected empty playlist config, got: %+v", resp.Data.Playlist)
 	}
 
-	if !reflect.DeepEqual([]string{"12:32", "16:28"}, resp.Data.Schedule.Playlist) {
-		t.Fatalf("unexpected playlist timers: %+v", resp.Data.Schedule.Playlist)
+	if len(resp.Data.Schedule.Playlist) != 0 {
+		t.Fatalf("expected empty playlist timers: %+v", resp.Data.Schedule.Playlist)
 	}
-	if !reflect.DeepEqual([]string{"22:22"}, resp.Data.Schedule.Video) {
+	if len(resp.Data.Schedule.Video) != 0 {
 		t.Fatalf("unexpected video timers: %+v", resp.Data.Schedule.Video)
 	}
 
@@ -409,36 +365,13 @@ func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
-	servicePath := filepath.Join(tmp, "playlist.upload.service")
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
 	audioPath := filepath.Join(tmp, "asound.conf")
 
-	originalServicePath := PlaylistServicePath
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
-	PlaylistServicePath = servicePath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
 	AudioConfigPath = audioPath
 	t.Cleanup(func() {
-		PlaylistServicePath = originalServicePath
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
 	})
-
-	serviceContent := `[Unit]
-Description = Rsync playlist upload service
-[Service]
-ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
-[Install]
-WantedBy = multi-user.target
-`
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
-		t.Fatalf("failed to write service file: %v", err)
-	}
 
 	originalRead := CrontabReadFunc
 	originalWrite := CrontabWriteFunc
@@ -457,7 +390,7 @@ WantedBy = multi-user.target
 		CrontabWriteFunc = originalWrite
 	})
 
-	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
+	body := `{"playlist":{"source":"","destination":""},"schedule":{"playlist":[],"video":[],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -466,31 +399,6 @@ WantedBy = multi-user.target
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
-	}
-
-	updatedService, err := os.ReadFile(servicePath)
-	if err != nil {
-		t.Fatalf("failed to read updated service file: %v", err)
-	}
-
-	if !strings.Contains(string(updatedService), "/mnt/ya.disk/playlist/test/ /mnt/usb/playlist/") {
-		t.Fatalf("updated service file does not contain new paths: %s", string(updatedService))
-	}
-
-	playlistData, err := os.ReadFile(playlistTimer)
-	if err != nil {
-		t.Fatalf("failed to read playlist timer: %v", err)
-	}
-	if !strings.Contains(string(playlistData), "OnCalendar=*-*-* 06:05:00") {
-		t.Fatalf("expected normalized playlist time, got %s", string(playlistData))
-	}
-
-	videoData, err := os.ReadFile(videoTimer)
-	if err != nil {
-		t.Fatalf("failed to read video timer: %v", err)
-	}
-	if !strings.Contains(string(videoData), "OnCalendar=*-*-* 22:22:00") {
-		t.Fatalf("expected video time, got %s", string(videoData))
 	}
 
 	if !writeCalled {
@@ -509,53 +417,17 @@ WantedBy = multi-user.target
 	}
 }
 
-func TestWriteTimerScheduleProducesValidUnit(t *testing.T) {
-	tmp := t.TempDir()
-	timerFile := filepath.Join(tmp, "test.timer")
-	times := []string{"06:05", "18:30"}
-	if err := writeTimerSchedule(timerFile, "Test timer", "test.service", times); err != nil {
-		t.Fatalf("writeTimerSchedule failed: %v", err)
-	}
-	content, err := os.ReadFile(timerFile)
-	if err != nil {
-		t.Fatalf("failed to read timer file: %v", err)
-	}
-	data := string(content)
-	for _, expected := range []string{"OnCalendar=*-*-* 06:05:00", "OnCalendar=*-*-* 18:30:00"} {
-		if !strings.Contains(data, expected) {
-			t.Fatalf("expected %s in timer file, got %s", expected, data)
-		}
-	}
-	if strings.Contains(data, "User=") {
-		t.Fatalf("timer file must not specify User, got %s", data)
-	}
-}
-
 func TestHandleConfigurationUploadValidation(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
-	servicePath := filepath.Join(tmp, "playlist.upload.service")
-	originalService := PlaylistServicePath
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
-	PlaylistServicePath = servicePath
-	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
-	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
 	AudioConfigPath = filepath.Join(tmp, "asound.conf")
 	t.Cleanup(func() {
-		PlaylistServicePath = originalService
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
 	})
 
-	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
-		t.Fatalf("failed to seed service file: %v", err)
-	}
-
-	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["25:00"],"video":["08:00"],"rest":[]},"audio":{"output":"invalid"}}`
+	body := `{"playlist":{"source":"","destination":""},"schedule":{"playlist":[],"video":[],"rest":[]},"audio":{"output":"invalid"}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -609,60 +481,8 @@ func TestHandleSystemShutdownMethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandlePlaylistStartStopMethodNotAllowed(t *testing.T) {
-	ServerKey = "test-key"
-
-	// start-upload expects POST
-	req := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/start-upload", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	w := httptest.NewRecorder()
-	HandlePlaylistStartUpload(w, req)
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405 for start-upload, got %d", w.Code)
-	}
-
-	// stop-upload expects POST
-	req2 := httptest.NewRequest(http.MethodGet, "/api/menu/playlist/stop-upload", nil)
-	req2.Header.Set("Authorization", "Bearer test-key")
-	w2 := httptest.NewRecorder()
-	HandlePlaylistStopUpload(w2, req2)
-	if w2.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405 for stop-upload, got %d", w2.Code)
-	}
-
-	// video start-upload expects POST
-	req3 := httptest.NewRequest(http.MethodGet, "/api/menu/video/start-upload", nil)
-	req3.Header.Set("Authorization", "Bearer test-key")
-	w3 := httptest.NewRecorder()
-	HandleVideoStartUpload(w3, req3)
-	if w3.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405 for video start-upload, got %d", w3.Code)
-	}
-
-	// video stop-upload expects POST
-	req4 := httptest.NewRequest(http.MethodGet, "/api/menu/video/stop-upload", nil)
-	req4.Header.Set("Authorization", "Bearer test-key")
-	w4 := httptest.NewRecorder()
-	HandleVideoStopUpload(w4, req4)
-	if w4.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405 for video stop-upload, got %d", w4.Code)
-	}
-}
-
 func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
 	ServerKey = "test-key"
-
-	tmp := t.TempDir()
-	servicePath := filepath.Join(tmp, "playlist.upload.service")
-	originalService := PlaylistServicePath
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	PlaylistServicePath = servicePath
-	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
-	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
-	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
-		t.Fatalf("failed to seed service file: %v", err)
-	}
 
 	originalRead := CrontabReadFunc
 	originalWrite := CrontabWriteFunc
@@ -673,14 +493,11 @@ func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() {
-		PlaylistServicePath = originalService
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
 		CrontabReadFunc = originalRead
 		CrontabWriteFunc = originalWrite
 	})
 
-	body := `{"playlist":{"source":"/a","destination":"/b"},"schedule":{"playlist":["6:05"],"video":["22:22"],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]},"audio":{"output":"hdmi"}}`
+	body := `{"playlist":{"source":"","destination":""},"schedule":{"playlist":[],"video":[],"rest":[{"start":"10:00","stop":"12:00"},{"start":"11:00","stop":"13:00"}]},"audio":{"output":"hdmi"}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -702,10 +519,6 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	expectedIDs := []string{
 		"configuration-get",
 		"configuration-update",
-		"playlist-start-upload",
-		"playlist-stop-upload",
-		"video-start-upload",
-		"video-stop-upload",
 	}
 
 	foundIDs := make(map[string]bool)
@@ -716,6 +529,20 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 	for _, expectedID := range expectedIDs {
 		if !foundIDs[expectedID] {
 			t.Errorf("expected action ID %q not found in menu actions", expectedID)
+		}
+	}
+	
+	// Ensure upload actions are NOT in the list
+	uploadIDs := []string{
+		"playlist-start-upload",
+		"playlist-stop-upload",
+		"video-start-upload",
+		"video-stop-upload",
+	}
+	
+	for _, uploadID := range uploadIDs {
+		if foundIDs[uploadID] {
+			t.Errorf("deprecated upload action ID %q should not be in menu actions", uploadID)
 		}
 	}
 }
