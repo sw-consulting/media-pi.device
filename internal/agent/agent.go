@@ -27,9 +27,9 @@ import (
 
 // SyncConfig holds video synchronization settings.
 type SyncConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	IntervalSeconds     int    `yaml:"interval_seconds"`
-	MaxParallelDownloads int   `yaml:"max_parallel_downloads"`
+	Enabled              bool     `yaml:"enabled"`
+	Schedule             []string `yaml:"schedule,omitempty"`
+	MaxParallelDownloads int      `yaml:"max_parallel_downloads"`
 }
 
 // Config represents the agent configuration file structure. It is loaded
@@ -133,8 +133,8 @@ func DefaultConfig() Config {
 		MediaPiServiceUser: "pi",
 		MediaDir:           "/var/lib/media-pi/videos",
 		Sync: SyncConfig{
-			Enabled:             true,
-			IntervalSeconds:     300,
+			Enabled:              true,
+			Schedule:             []string{"03:00", "15:00"},
 			MaxParallelDownloads: 2,
 		},
 	}
@@ -177,8 +177,8 @@ func LoadConfigFrom(path string) (*Config, error) {
 	}
 	
 	// Set default sync config if not specified
-	if c.Sync.IntervalSeconds == 0 {
-		c.Sync.IntervalSeconds = 300
+	if len(c.Sync.Schedule) == 0 {
+		c.Sync.Schedule = []string{"03:00", "15:00"}
 	}
 	if c.Sync.MaxParallelDownloads == 0 {
 		c.Sync.MaxParallelDownloads = 2

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSyncOnce_FetchManifest(t *testing.T) {
@@ -44,8 +45,8 @@ func TestSyncOnce_FetchManifest(t *testing.T) {
 		CoreAPIBase: server.URL,
 		MediaDir:    tmpDir,
 		Sync: SyncConfig{
-			Enabled:             true,
-			IntervalSeconds:     300,
+			Enabled:              true,
+			Schedule:             []string{"03:00", "15:00"},
 			MaxParallelDownloads: 2,
 		},
 	}
@@ -100,8 +101,8 @@ func TestSyncOnce_VerifyHashMismatch(t *testing.T) {
 		CoreAPIBase: server.URL,
 		MediaDir:    tmpDir,
 		Sync: SyncConfig{
-			Enabled:             true,
-			IntervalSeconds:     300,
+			Enabled:              true,
+			Schedule:             []string{"03:00", "15:00"},
 			MaxParallelDownloads: 2,
 		},
 	}
@@ -151,8 +152,8 @@ func TestSyncOnce_GarbageCollection(t *testing.T) {
 		CoreAPIBase: server.URL,
 		MediaDir:    tmpDir,
 		Sync: SyncConfig{
-			Enabled:             true,
-			IntervalSeconds:     300,
+			Enabled:              true,
+			Schedule:             []string{"03:00", "15:00"},
 			MaxParallelDownloads: 2,
 		},
 	}
@@ -218,6 +219,52 @@ func TestGetSyncStatus(t *testing.T) {
 	}
 	if status.LastSyncError != string(testErr) {
 		t.Errorf("expected error %q, got %q", testErr, status.LastSyncError)
+	}
+}
+
+func TestCalculateNextSyncTime(t *testing.T) {
+	// Test with multiple times
+	schedule := []string{"03:00", "15:00", "21:30"}
+	
+	// Get next sync time
+	nextTime := calculateNextSyncTime(schedule)
+	
+	// Should be one of the scheduled times
+	hour := nextTime.Hour()
+	minute := nextTime.Minute()
+	
+	validTimes := map[int]map[int]bool{
+		3:  {0: true},
+		15: {0: true},
+		21: {30: true},
+	}
+	
+	if !validTimes[hour][minute] {
+		t.Errorf("next sync time %02d:%02d is not in schedule", hour, minute)
+	}
+	
+	// Should be in the future
+	if !nextTime.After(time.Now()) {
+		t.Error("next sync time should be in the future")
+	}
+}
+
+func TestCalculateNextSyncTime_InvalidFormat(t *testing.T) {
+	// Test with invalid time format
+	schedule := []string{"invalid", "25:00", "12:99"}
+	
+	// Should still return a valid time (1 hour from now as fallback)
+	nextTime := calculateNextSyncTime(schedule)
+	
+	if nextTime.IsZero() {
+		t.Error("should return a valid fallback time")
+	}
+	
+	// Should be roughly 1 hour from now (within 5 minutes tolerance)
+	expectedTime := time.Now().Add(1 * time.Hour)
+	diff := nextTime.Sub(expectedTime)
+	if diff < -5*time.Minute || diff > 5*time.Minute {
+		t.Errorf("fallback time should be ~1 hour from now, got %v", nextTime)
 	}
 }
 

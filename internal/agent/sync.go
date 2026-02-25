@@ -300,30 +300,38 @@ func downloadFile(ctx context.Context, item ManifestItem) error {
 	return nil
 }
 
-// StartSyncScheduler starts a background goroutine that periodically runs SyncOnce.
+// StartSyncScheduler starts a background goroutine that runs SyncOnce on a schedule.
 // It should be called once at agent startup if sync is enabled.
+// The schedule uses cron-like time specifications (HH:MM format).
 func StartSyncScheduler(ctx context.Context) {
 	if AgentConfig == nil || !AgentConfig.Sync.Enabled {
 		log.Printf("Sync scheduler not started: sync disabled or config not loaded")
 		return
 	}
 
-	interval := time.Duration(AgentConfig.Sync.IntervalSeconds) * time.Second
-	log.Printf("Starting sync scheduler with interval: %v", interval)
+	if len(AgentConfig.Sync.Schedule) == 0 {
+		log.Printf("Sync scheduler not started: no schedule times configured")
+		return
+	}
+
+	log.Printf("Starting sync scheduler with times: %v", AgentConfig.Sync.Schedule)
 
 	go func() {
 		// Run initial sync after a short delay to allow agent to fully start
 		time.Sleep(10 * time.Second)
 		
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
 		for {
+			// Calculate time until next scheduled sync
+			nextRun := calculateNextSyncTime(AgentConfig.Sync.Schedule)
+			waitDuration := time.Until(nextRun)
+			
+			log.Printf("Next sync scheduled for: %v (in %v)", nextRun.Format("15:04:05"), waitDuration)
+			
 			select {
 			case <-ctx.Done():
 				log.Printf("Sync scheduler stopped")
 				return
-			case <-ticker.C:
+			case <-time.After(waitDuration):
 				// Check if a sync is already in progress
 				syncState.mu.RLock()
 				inProgress := syncState.InProgress
@@ -343,4 +351,48 @@ func StartSyncScheduler(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// calculateNextSyncTime determines the next time sync should run based on the schedule.
+// Schedule times are in HH:MM format. Returns the next occurrence of any scheduled time.
+func calculateNextSyncTime(schedule []string) time.Time {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	
+	var nextTime time.Time
+	
+	for _, timeStr := range schedule {
+		// Parse HH:MM
+		var hour, minute int
+		if _, err := fmt.Sscanf(timeStr, "%d:%d", &hour, &minute); err != nil {
+			log.Printf("Warning: invalid time format in schedule: %s", timeStr)
+			continue
+		}
+		
+		if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+			log.Printf("Warning: invalid time values in schedule: %s", timeStr)
+			continue
+		}
+		
+		// Calculate next occurrence of this time
+		scheduledTime := today.Add(time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute)
+		
+		// If this time has already passed today, schedule for tomorrow
+		if scheduledTime.Before(now) || scheduledTime.Equal(now) {
+			scheduledTime = scheduledTime.Add(24 * time.Hour)
+		}
+		
+		// Keep track of the earliest next time
+		if nextTime.IsZero() || scheduledTime.Before(nextTime) {
+			nextTime = scheduledTime
+		}
+	}
+	
+	// If no valid times found, default to 1 hour from now
+	if nextTime.IsZero() {
+		nextTime = now.Add(1 * time.Hour)
+		log.Printf("Warning: no valid schedule times, defaulting to 1 hour from now")
+	}
+	
+	return nextTime
 }
