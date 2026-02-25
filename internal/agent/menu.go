@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -396,7 +397,7 @@ func isPathMounted(path string) bool {
 	return false
 }
 
-// HandleServiceStatus returns statuses for playback, playlist upload services
+// HandleServiceStatus returns statuses for playback, sync scheduler
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -426,10 +427,13 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 
+	// Check if sync scheduler is running (replaces old upload service checks)
+	syncRunning := IsSyncSchedulerRunning()
+
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
-		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
-		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
+		PlaylistUploadServiceStatus: syncRunning, // Now reports sync scheduler status
+		VideoUploadServiceStatus:    syncRunning, // Now reports sync scheduler status
 		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
 	}
 
@@ -884,52 +888,140 @@ func handleUploadServiceAction(
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
 }
 
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
+// HandlePlaylistStartUpload starts the in-agent sync scheduler.
+// This replaces the old playlist.upload.service D-Bus interaction.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
-		"Не удалось запустить загрузку плейлиста: %v",
-		"Таймаут запуска сервиса загрузки плейлиста",
-		"Загрузка плейлиста запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Start the sync scheduler if not already running
+	if !IsSyncSchedulerRunning() {
+		StartSyncScheduler(ctx)
+	}
+
+	// Trigger an immediate sync
+	go func() {
+		if err := TriggerSync(ctx); err != nil {
+			log.Printf("Manual playlist sync error: %v", err)
+		} else {
+			// After successful sync, restart video.play service
+			if err := restartVideoPlayService(); err != nil {
+				log.Printf("Warning: failed to restart video.play service: %v", err)
+			}
+		}
+	}()
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-start-upload",
+			Result:  "done",
+			Message: "Синхронизация плейлиста запущена",
+		},
+	})
 }
 
-// HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
+// HandlePlaylistStopUpload stops the in-agent sync scheduler.
+// This replaces the old playlist.upload.service D-Bus interaction.
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-stop-upload",
-		"Не удалось остановить загрузку плейлиста: %v",
-		"Таймаут остановки сервиса загрузки плейлиста",
-		"Загрузка плейлиста остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	StopSyncScheduler()
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-stop-upload",
+			Result:  "done",
+			Message: "Синхронизация плейлиста остановлена",
+		},
+	})
 }
 
-// HandleVideoStartUpload starts the video.upload.service via D-Bus.
+// HandleVideoStartUpload starts the in-agent sync scheduler.
+// This replaces the old video.upload.service D-Bus interaction.
 func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-start-upload",
-		"Не удалось запустить загрузку видео: %v",
-		"Таймаут запуска сервиса загрузки видео",
-		"Загрузка видео запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Start the sync scheduler if not already running
+	if !IsSyncSchedulerRunning() {
+		StartSyncScheduler(ctx)
+	}
+
+	// Trigger an immediate sync
+	go func() {
+		if err := TriggerSync(ctx); err != nil {
+			log.Printf("Manual video sync error: %v", err)
+		}
+	}()
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "video-start-upload",
+			Result:  "done",
+			Message: "Синхронизация видео запущена",
+		},
+	})
 }
 
-// HandleVideoStopUpload stops the video.upload.service via D-Bus.
+// HandleVideoStopUpload stops the in-agent sync scheduler.
+// This replaces the old video.upload.service D-Bus interaction.
 func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-stop-upload",
-		"Не удалось остановить загрузку видео: %v",
-		"Таймаут остановки сервиса загрузки видео",
-		"Загрузка видео остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
-		})
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+		return
+	}
+
+	StopSyncScheduler()
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "video-stop-upload",
+			Result:  "done",
+			Message: "Синхронизация видео остановлена",
+		},
+	})
+}
+
+// restartVideoPlayService restarts the video.play service after a successful sync.
+func restartVideoPlayService() error {
+	conn, err := getDBusConnection(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to connect to D-Bus: %w", err)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.RestartUnitContext(ctx, "play.video.service", "replace", ch)
+	if err != nil {
+		return err
+	}
+
+	// Wait for result
+	select {
+	case <-ch:
+		log.Println("Successfully restarted play.video.service")
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("timeout restarting play.video.service")
+	}
 }
 
 // HandleScheduleGet returns the configured update timers for playlist and video uploads.
@@ -942,20 +1034,12 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
+	// Read sync schedule (used for both playlist and video)
+	syncTimes, err := GetSyncSchedule()
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось прочитать расписание синхронизации: %v", err),
 		})
 		return
 	}
@@ -972,8 +1056,8 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: ScheduleResponse{
-			Playlist: playlistTimers,
-			Video:    videoTimers,
+			Playlist: syncTimes,
+			Video:    syncTimes,
 			Rest:     restTimes,
 		},
 	})
@@ -1046,18 +1130,28 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err),
-		})
-		return
+	// Combine playlist and video times for unified sync schedule
+	// Use playlist times primarily, but if video has additional times, include them
+	syncTimes := make(map[string]bool)
+	for _, t := range normalizedPlaylist {
+		syncTimes[t] = true
+	}
+	for _, t := range normalizedVideo {
+		syncTimes[t] = true
 	}
 
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
+	// Convert map to sorted slice
+	var combinedTimes []string
+	for t := range syncTimes {
+		combinedTimes = append(combinedTimes, t)
+	}
+	sort.Strings(combinedTimes)
+
+	// Save sync schedule
+	if err := SetSyncSchedule(combinedTimes); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось сохранить расписание синхронизации: %v", err),
 		})
 		return
 	}
