@@ -190,7 +190,6 @@ type ConfigurationSettings struct {
 // service-status endpoint.
 type ServiceStatusResponse struct {
 	PlaybackServiceStatus bool       `json:"playbackServiceStatus"`
-	YaDiskMountStatus     bool       `json:"yaDiskMountStatus"`
 	SyncEnabled           bool       `json:"syncEnabled"`
 	SyncInProgress        bool       `json:"syncInProgress"`
 	SyncLastTime          *time.Time `json:"syncLastTime,omitempty"`
@@ -417,7 +416,6 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus: checkUnit("play.video.service"),
-		YaDiskMountStatus:     isPathMounted("/mnt/ya.disk"),
 		SyncEnabled:           CurrentSyncConfig.Enabled,
 		SyncInProgress:        syncStatus.SyncInProgress,
 		SyncLastTime:          lastSyncTime,

@@ -157,7 +157,6 @@ sync:
 - `device_auth_token` — токен аутентификации устройства (устанавливается при регистрации устройства)
 - `media_dir` — директория для хранения видеофайлов (по умолчанию: `/var/lib/media-pi/videos`)
 - `sync.enabled` — включить/выключить автоматическую синхронизацию (по умолчанию: `true`)
-- `sync.interval_seconds` — интервал между синхронизациями в секундах, используется если не задано расписание (по умолчанию: `300` = 5 минут)
 - `sync.max_parallel_downloads` — максимальное количество параллельных загрузок файлов (по умолчанию: `2`)
 
 ### Синхронизация видео
@@ -165,8 +164,7 @@ sync:
 Агент автоматически синхронизирует видеофайлы с backend сервером media-pi.core. Синхронизация выполняется:
 
 1. **По расписанию** — можно настроить через API `/api/menu/sync/schedule/update` или `/api/menu/schedule/update`
-2. **По интервалу** — если расписание не задано, используется `sync.interval_seconds`
-3. **Вручную** — через API `/api/menu/sync/start`
+2. **Вручную** — через API `/api/menu/sync/start`
 
 Процесс синхронизации:
 - Получает список файлов (manifest) с backend API `/api/devicesync`
@@ -182,7 +180,6 @@ sync:
   "ok": true,
   "data": {
     "playbackServiceStatus": true,
-    "yaDiskMountStatus": false,
     "syncEnabled": true,
     "syncInProgress": false,
     "syncLastTime": "2026-02-25T15:30:00Z",

@@ -94,6 +94,17 @@ func StartSyncScheduler() {
 			}
 
 			nextSync := calculateNextSyncTime()
+			
+			// If no schedule is configured, wait and check again
+			if nextSync.IsZero() {
+				select {
+				case <-time.After(1 * time.Minute):
+					continue
+				case <-syncStopChan:
+					return
+				}
+			}
+			
 			log.Printf("Next scheduled sync at: %s", nextSync.Format(time.RFC3339))
 
 			select {
@@ -120,6 +131,7 @@ func StopSyncScheduler() {
 }
 
 // calculateNextSyncTime calculates when the next sync should occur based on schedule.
+// Returns zero time if no schedule is configured.
 func calculateNextSyncTime() time.Time {
 	syncScheduleMutex.RLock()
 	times := syncSchedule.Times
@@ -127,9 +139,9 @@ func calculateNextSyncTime() time.Time {
 
 	now := time.Now()
 	
-	// If no schedule is configured, use the interval
+	// If no schedule is configured, return zero time (no automatic sync)
 	if len(times) == 0 {
-		return now.Add(time.Duration(CurrentSyncConfig.IntervalSeconds) * time.Second)
+		return time.Time{}
 	}
 
 	// Parse all scheduled times and find the next one
@@ -172,8 +184,8 @@ func calculateNextSyncTime() time.Time {
 		return nextDayTime
 	}
 	
-	// Fallback to interval-based scheduling
-	return now.Add(time.Duration(CurrentSyncConfig.IntervalSeconds) * time.Second)
+	// No valid schedule found
+	return time.Time{}
 }
 
 // TriggerSync triggers an on-demand synchronization.

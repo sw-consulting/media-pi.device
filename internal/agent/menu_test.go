@@ -233,11 +233,6 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	if resp.Data.SyncInProgress {
 		t.Fatalf("expected sync not to be in progress")
 	}
-
-	// Ensure the mount detection reads our temp mounts file
-	if resp.Data.YaDiskMountStatus != true {
-		t.Fatalf("expected ya disk to be reported mounted, got %v", resp.Data.YaDiskMountStatus)
-	}
 }
 
 // noopDBusConnectionForStatus is a test helper that reports ActiveState=active

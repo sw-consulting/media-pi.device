@@ -436,22 +436,17 @@ func TestCalculateNextSyncTime(t *testing.T) {
 	tmp := t.TempDir()
 	syncSchedulePath = filepath.Join(tmp, "sync.schedule.json")
 
-	// Test with no schedule - should use interval
+	// Test with no schedule - should return zero time (no automatic sync)
 	CurrentSyncConfig = SyncConfig{
 		Enabled:         true,
 		IntervalSeconds: 300,
 	}
 	
-	before := time.Now()
 	nextTime := calculateNextSyncTime()
-	after := time.Now()
 
-	// Next time should be approximately 300 seconds from now
-	expectedMin := before.Add(290 * time.Second)
-	expectedMax := after.Add(310 * time.Second)
-	
-	if nextTime.Before(expectedMin) || nextTime.After(expectedMax) {
-		t.Errorf("next sync time %v not in expected range [%v, %v]", nextTime, expectedMin, expectedMax)
+	// Should return zero time when no schedule is configured
+	if !nextTime.IsZero() {
+		t.Errorf("expected zero time with no schedule, got %v", nextTime)
 	}
 
 	// Test with schedule - use a time that's definitely in the future today
@@ -468,8 +463,8 @@ func TestCalculateNextSyncTime(t *testing.T) {
 	nextTime = calculateNextSyncTime()
 	
 	// Next time should be roughly 2 hours from now (within 5 minutes tolerance)
-	expectedMin = now.Add(115 * time.Minute)
-	expectedMax = now.Add(125 * time.Minute)
+	expectedMin := now.Add(115 * time.Minute)
+	expectedMax := now.Add(125 * time.Minute)
 	
 	if nextTime.Before(expectedMin) || nextTime.After(expectedMax) {
 		t.Errorf("scheduled next sync time %v not in expected range [%v, %v]", nextTime, expectedMin, expectedMax)
