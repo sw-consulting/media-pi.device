@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -89,6 +90,14 @@ func main() {
 	}
 	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
 
+	// Create a context for the sync scheduler
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the sync scheduler
+	log.Println("Starting sync scheduler...")
+	agent.StartSyncScheduler(ctx)
+
 	server := &http.Server{
 		Addr:         listenAddr,
 		Handler:      mux,
@@ -99,14 +108,22 @@ func main() {
 
 	// Handle SIGHUP to reload configuration without restarting the process.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		for range sigs {
-			log.Printf("received SIGHUP, reloading configuration")
-			if err := agent.ReloadConfig(); err != nil {
-				log.Printf("reload failed: %v", err)
-			} else {
-				log.Printf("configuration reloaded")
+		for sig := range sigs {
+			switch sig {
+			case syscall.SIGHUP:
+				log.Printf("received SIGHUP, reloading configuration")
+				if err := agent.ReloadConfig(); err != nil {
+					log.Printf("reload failed: %v", err)
+				} else {
+					log.Printf("configuration reloaded")
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Printf("received %v, shutting down", sig)
+				cancel() // Stop sync scheduler
+				server.Close()
+				os.Exit(0)
 			}
 		}
 	}()
