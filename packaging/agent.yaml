@@ -5,10 +5,6 @@ allowed_units:
   - mnt-usb.mount
   - mnt-ya.disk.mount
   - mnt-ya.disk.automount
-  - playlist.upload.service
-  - video.upload.service
-  - playlist.upload.timer 
-  - video.upload.timer
   - play.video.service
 
 # Server key for API authentication (generate with: media-pi-agent setup)
@@ -19,3 +15,23 @@ listen_addr: "0.0.0.0:8081"
 
 # Username for media-pi service operations (crontab and systemd timers, default: pi)
 media_pi_service_user: "pi"
+
+# Core API base URL for video synchronization
+# This should point to the media-pi.core backend
+core_api_base: ""
+
+# Device authentication token for backend API calls
+# This will be set by setup script during device registration
+device_auth_token: ""
+
+# Directory where videos are stored (default: /var/lib/media-pi/videos)
+media_dir: "/var/lib/media-pi/videos"
+
+# Video synchronization configuration
+sync:
+  # Enable/disable automatic synchronization (default: true)
+  enabled: true
+  # Sync interval in seconds (default: 300 = 5 minutes)
+  interval_seconds: 300
+  # Maximum number of parallel downloads (default: 2)
+  max_parallel_downloads: 2

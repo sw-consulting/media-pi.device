@@ -130,32 +130,11 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/configuration/update",
 		},
 		{
-			ID:          "playlist-start-upload",
-			Name:        "Начать загрузку плейлиста",
-			Description: "Запустить сервис загрузки плейлистов",
+			ID:          "sync-start",
+			Name:        "Запустить синхронизацию",
+			Description: "Запустить синхронизацию видео",
 			Method:      "POST",
-			Path:        "/api/menu/playlist/start-upload",
-		},
-		{
-			ID:          "playlist-stop-upload",
-			Name:        "Остановить загрузку плейлиста",
-			Description: "Остановить сервис загрузки плейлистов",
-			Method:      "POST",
-			Path:        "/api/menu/playlist/stop-upload",
-		},
-		{
-			ID:          "video-start-upload",
-			Name:        "Начать загрузку видео",
-			Description: "Запустить сервис загрузки видео",
-			Method:      "POST",
-			Path:        "/api/menu/video/start-upload",
-		},
-		{
-			ID:          "video-stop-upload",
-			Name:        "Остановить загрузку видео",
-			Description: "Остановить сервис загрузки видео",
-			Method:      "POST",
-			Path:        "/api/menu/video/stop-upload",
+			Path:        "/api/menu/sync/start",
 		},
 		{
 			ID:          "system-reload",
@@ -210,10 +189,13 @@ type ConfigurationSettings struct {
 // ServiceStatusResponse describes the service status returned by the
 // service-status endpoint.
 type ServiceStatusResponse struct {
-	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
-	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
-	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
-	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
+	PlaybackServiceStatus bool       `json:"playbackServiceStatus"`
+	YaDiskMountStatus     bool       `json:"yaDiskMountStatus"`
+	SyncEnabled           bool       `json:"syncEnabled"`
+	SyncInProgress        bool       `json:"syncInProgress"`
+	SyncLastTime          *time.Time `json:"syncLastTime,omitempty"`
+	SyncLastOK            bool       `json:"syncLastOk"`
+	SyncLastError         string     `json:"syncLastError,omitempty"`
 }
 
 // HandleMenuList returns the list of available menu actions.
@@ -396,7 +378,7 @@ func isPathMounted(path string) bool {
 	return false
 }
 
-// HandleServiceStatus returns statuses for playback, playlist upload services
+// HandleServiceStatus returns statuses for playback service, sync status
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -426,11 +408,21 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 
+	// Get sync status
+	syncStatus := GetSyncStatus()
+	var lastSyncTime *time.Time
+	if !syncStatus.LastSyncTime.IsZero() {
+		lastSyncTime = &syncStatus.LastSyncTime
+	}
+
 	resp := ServiceStatusResponse{
-		PlaybackServiceStatus:       checkUnit("play.video.service"),
-		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
-		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
-		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
+		PlaybackServiceStatus: checkUnit("play.video.service"),
+		YaDiskMountStatus:     isPathMounted("/mnt/ya.disk"),
+		SyncEnabled:           CurrentSyncConfig.Enabled,
+		SyncInProgress:        syncStatus.SyncInProgress,
+		SyncLastTime:          lastSyncTime,
+		SyncLastOK:            syncStatus.LastSyncOK,
+		SyncLastError:         syncStatus.LastSyncError,
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})
@@ -1640,3 +1632,87 @@ func isValidTimeFormat(timeStr string) bool {
 	_, _, err := parseHourMinute(timeStr)
 	return err == nil
 }
+
+// HandleSyncStart triggers an on-demand synchronization.
+func HandleSyncStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	if err := TriggerSync(); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось запустить синхронизацию: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "sync-start",
+			Result:  "done",
+			Message: "Синхронизация запущена",
+		},
+	})
+}
+
+// HandleSyncScheduleGet returns the current sync schedule.
+func HandleSyncScheduleGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	schedule := GetSyncSchedule()
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK:   true,
+		Data: schedule,
+	})
+}
+
+// HandleSyncScheduleUpdate updates the sync schedule.
+func HandleSyncScheduleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Метод не разрешён",
+		})
+		return
+	}
+
+	var req SyncScheduleSettings
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: "Неверный JSON в теле запроса",
+		})
+		return
+	}
+
+	if err := SetSyncSchedule(req.Times); err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Неверное расписание: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "sync-schedule-update",
+			Result:  "done",
+			Message: "Расписание синхронизации обновлено",
+		},
+	})
+}
+
+

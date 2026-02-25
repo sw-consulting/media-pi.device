@@ -25,14 +25,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SyncConfig contains video synchronization settings.
+type SyncConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	IntervalSeconds     int    `yaml:"interval_seconds"`
+	MaxParallelDownloads int   `yaml:"max_parallel_downloads"`
+}
+
 // Config represents the agent configuration file structure. It is loaded
 // from YAML and contains the list of allowed systemd units, the server
 // authentication key and the listen address for the HTTP API.
 type Config struct {
-	AllowedUnits       []string `yaml:"allowed_units"`
-	ServerKey          string   `yaml:"server_key,omitempty"`
-	ListenAddr         string   `yaml:"listen_addr,omitempty"`
-	MediaPiServiceUser string   `yaml:"media_pi_service_user,omitempty"`
+	AllowedUnits       []string   `yaml:"allowed_units"`
+	ServerKey          string     `yaml:"server_key,omitempty"`
+	ListenAddr         string     `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser string     `yaml:"media_pi_service_user,omitempty"`
+	CoreAPIBase        string     `yaml:"core_api_base,omitempty"`
+	DeviceAuthToken    string     `yaml:"device_auth_token,omitempty"`
+	MediaDir           string     `yaml:"media_dir,omitempty"`
+	Sync               SyncConfig `yaml:"sync,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -82,6 +93,18 @@ var (
 	// MediaPiServiceUser is the username for crontab and systemd timer operations.
 	// It defaults to "pi" and is loaded from the configuration.
 	MediaPiServiceUser string
+
+	// CoreAPIBase is the URL of the media-pi.core backend API
+	CoreAPIBase string
+
+	// DeviceAuthToken is the authentication token for backend API calls
+	DeviceAuthToken string
+
+	// MediaDir is the directory where videos are stored
+	MediaDir string
+
+	// CurrentSyncConfig holds the current sync configuration
+	CurrentSyncConfig SyncConfig
 )
 
 // DefaultListenAddr is used when the configuration does not specify a
@@ -116,6 +139,12 @@ func DefaultConfig() Config {
 		AllowedUnits:       []string{},
 		ListenAddr:         DefaultListenAddr,
 		MediaPiServiceUser: "pi",
+		MediaDir:           "/var/lib/media-pi/videos",
+		Sync: SyncConfig{
+			Enabled:             true,
+			IntervalSeconds:     300,
+			MaxParallelDownloads: 2,
+		},
 	}
 }
 
@@ -146,9 +175,26 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MediaPiServiceUser = "pi"
 	}
 
+	// Set default media directory if not specified
+	if c.MediaDir == "" {
+		c.MediaDir = "/var/lib/media-pi/videos"
+	}
+
+	// Set default sync config if not specified
+	if c.Sync.IntervalSeconds == 0 {
+		c.Sync.IntervalSeconds = 300
+	}
+	if c.Sync.MaxParallelDownloads == 0 {
+		c.Sync.MaxParallelDownloads = 2
+	}
+
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
+	CoreAPIBase = c.CoreAPIBase
+	DeviceAuthToken = c.DeviceAuthToken
+	MediaDir = c.MediaDir
+	CurrentSyncConfig = c.Sync
 
 	return &c, nil
 }

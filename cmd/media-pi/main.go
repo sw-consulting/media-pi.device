@@ -79,6 +79,9 @@ func main() {
 	mux.HandleFunc("/api/menu/playlist/stop-upload", agent.AuthMiddleware(agent.HandlePlaylistStopUpload))
 	mux.HandleFunc("/api/menu/video/start-upload", agent.AuthMiddleware(agent.HandleVideoStartUpload))
 	mux.HandleFunc("/api/menu/video/stop-upload", agent.AuthMiddleware(agent.HandleVideoStopUpload))
+	mux.HandleFunc("/api/menu/sync/start", agent.AuthMiddleware(agent.HandleSyncStart))
+	mux.HandleFunc("/api/menu/sync/schedule/get", agent.AuthMiddleware(agent.HandleSyncScheduleGet))
+	mux.HandleFunc("/api/menu/sync/schedule/update", agent.AuthMiddleware(agent.HandleSyncScheduleUpdate))
 	mux.HandleFunc("/api/menu/system/reload", agent.AuthMiddleware(agent.HandleSystemReload))
 	mux.HandleFunc("/api/menu/system/reboot", agent.AuthMiddleware(agent.HandleSystemReboot))
 	mux.HandleFunc("/api/menu/system/shutdown", agent.AuthMiddleware(agent.HandleSystemShutdown))
@@ -88,6 +91,13 @@ func main() {
 		listenAddr = agent.DefaultListenAddr
 	}
 	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
+
+	// Start sync scheduler if enabled
+	if agent.CurrentSyncConfig.Enabled {
+		log.Printf("Starting sync scheduler")
+		agent.StartSyncScheduler()
+		defer agent.StopSyncScheduler()
+	}
 
 	server := &http.Server{
 		Addr:         listenAddr,

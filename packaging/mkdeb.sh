@@ -171,9 +171,6 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
-# Reload systemd daemon to pick up new/updated service file
-systemctl daemon-reload || true
-
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then
     if [ -z "$2" ]; then
@@ -189,13 +186,33 @@ if [ "$1" = "configure" ]; then
         # Upgrade from previous version
         echo "Media Pi Agent upgraded successfully."
         
+        # Disable and stop old upload services and yandex disk automount if they exist
+        echo "Disabling obsolete upload services..."
+        for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer mnt-ya.disk.automount; do
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                echo "Stopping $unit..."
+                systemctl stop "$unit" || true
+            fi
+            if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+                echo "Disabling $unit..."
+                systemctl disable "$unit" || true
+            fi
+        done
+        
+        # Create media directory with correct permissions
+        mkdir -p /var/lib/media-pi/videos || true
+        chown pi:pi /var/lib/media-pi/videos 2>/dev/null || true
+        chmod 755 /var/lib/media-pi/videos || true
+        
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
             echo "Restarting media-pi-agent service..."
+            systemctl daemon-reload || true
             systemctl start media-pi-agent.service || {
                 echo "Failed to start service. You may need to run: sudo -E setup-media-pi.sh"
             }
         else
+            systemctl daemon-reload || true
             echo "Service not enabled. Run: sudo -E setup-media-pi.sh to enable and start the service."
         fi
     fi
