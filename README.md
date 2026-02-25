@@ -84,15 +84,11 @@ sudo systemctl status media-pi-agent
 
 - `POST /api/menu/playback/stop` — остановить воспроизведение
 - `POST /api/menu/playback/start` — запустить воспроизведение
-- `GET /api/menu/storage/check` — проверка Яндекс.Диска
-- `GET /api/menu/playlist/get` — получение настроек сервиса загрузки плейлистов
-- `PUT /api/menu/playlist/update` — обновление настроек сервиса загрузки плейлистов
-- `POST /api/menu/playlist/start-upload` — начать загрузку плейлиста (запустить `playlist.upload.service`)
-- `POST /api/menu/playlist/stop-upload` — остановить загрузку плейлиста (остановить `playlist.upload.service`)
-- `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
-- `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
-- `GET /api/menu/audio/get` — получить текущие настройки аудио
-- `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
+- `GET /api/menu/service/status` — получить статус сервисов (воспроизведение, синхронизация, монтирование)
+- `GET /api/menu/configuration/get` — получить конфигурацию расписания отдыха и аудио
+- `PUT /api/menu/configuration/update` — обновить конфигурацию расписания отдыха и аудио
+- `GET /api/menu/schedule/get` — получить расписание интервалов отдыха
+- `PUT /api/menu/schedule/update` — обновить расписание интервалов отдыха (crontab)
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)
 - `POST /api/menu/system/reboot` — перезагрузка системы
 - `POST /api/menu/system/shutdown` — выключение системы
@@ -131,6 +127,13 @@ allowed_units:
 server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
+core_api_base: "https://your-server.com"
+device_auth_token: "device-specific-token"
+media_dir: "/var/lib/media-pi/videos"
+sync:
+  enabled: true
+  interval_seconds: 300
+  max_parallel_downloads: 2
 ```
 
 Параметры конфигурации:
@@ -139,6 +142,24 @@ media_pi_service_user: "pi"
 - `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
 - `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`). Этот параметр определяет, от имени какого пользователя будут выполняться операции управления расписанием интервалов отдыха через API `/api/menu/schedule/get` и `/api/menu/schedule/update`
+- `core_api_base` — URL API сервера управления (media-pi.core) для синхронизации видео (опционально)
+- `device_auth_token` — токен авторизации устройства для доступа к API синхронизации (опционально, если используется другой метод авторизации)
+- `media_dir` — директория для хранения синхронизированных видеофайлов (по умолчанию: `/var/lib/media-pi/videos`)
+- `sync.enabled` — включить/выключить автоматическую синхронизацию видео (по умолчанию: `true`)
+- `sync.interval_seconds` — интервал синхронизации в секундах (по умолчанию: `300` = 5 минут)
+- `sync.max_parallel_downloads` — максимальное количество параллельных загрузок (по умолчанию: `2`)
+
+### Видео синхронизация
+
+Агент автоматически синхронизирует видеофайлы с сервером управления (media-pi.core) используя API `/api/devicesync`. Синхронизация выполняется периодически в фоновом режиме:
+
+- Агент получает список файлов (манифест) с сервера
+- Проверяет локальные файлы по SHA256 хешу и размеру
+- Загружает отсутствующие или устаревшие файлы
+- Удаляет файлы, которых нет в манифесте (garbage collection)
+- Все загрузки выполняются атомарно с проверкой целостности
+
+Статус синхронизации доступен через endpoint `GET /api/menu/service/status`.
 
 ## Устранение неполадок
 

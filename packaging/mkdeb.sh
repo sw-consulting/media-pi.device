@@ -171,6 +171,36 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
+# Create media directory for video sync
+mkdir -p /var/lib/media-pi/videos || true
+chown pi:pi /var/lib/media-pi/videos 2>/dev/null || true
+chmod 755 /var/lib/media-pi/videos || true
+
+# Remove old upload service units on upgrade
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    echo "Removing deprecated upload services..."
+    
+    # Stop and disable old upload services if they exist
+    for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            echo "Stopping $unit..."
+            systemctl stop "$unit" || true
+        fi
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            echo "Disabling $unit..."
+            systemctl disable "$unit" || true
+        fi
+    done
+    
+    # Remove old unit files
+    for file in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+        if [ -f "/etc/systemd/system/$file" ]; then
+            echo "Removing /etc/systemd/system/$file..."
+            rm -f "/etc/systemd/system/$file" || true
+        fi
+    done
+fi
+
 # Reload systemd daemon to pick up new/updated service file
 systemctl daemon-reload || true
 
@@ -185,9 +215,11 @@ if [ "$1" = "configure" ]; then
         echo "2. Run: sudo -E setup-media-pi.sh"
         echo ""
         echo "The service will be started automatically after running setup-media-pi.sh"
+        echo "Video synchronization will run automatically every 5 minutes by default."
     else
         # Upgrade from previous version
         echo "Media Pi Agent upgraded successfully."
+        echo "Video synchronization now runs in-agent (no separate upload services needed)."
         
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
