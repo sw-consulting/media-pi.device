@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -55,6 +56,11 @@ func main() {
 	}
 	// Make the loaded config path available to the agent package for reloads
 	agent.ConfigPath = configPath
+
+	// Start sync scheduler if enabled
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent.StartSyncScheduler(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", agent.HandleHealth)
