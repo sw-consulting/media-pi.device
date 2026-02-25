@@ -570,30 +570,15 @@ func writeAudioSettings(output string) error {
 	return os.WriteFile(AudioConfigPath, []byte(config), 0644)
 }
 
-// HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
+// HandleConfigurationGet aggregates schedule and audio configuration into a single response.
 func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
 		return
 	}
 
-	playlistCfg, err := readPlaylistUploadConfig(PlaylistServicePath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err)})
-		return
-	}
-
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err)})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err)})
-		return
-	}
+	// Get sync schedule (replaces playlist and video timers)
+	syncSchedule := GetSyncSchedule()
 
 	restTimes, err := getRestTimes()
 	if err != nil {
@@ -607,14 +592,15 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use empty playlist config for backward compatibility
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
-		Playlist: playlistCfg,
-		Schedule: ScheduleSettings{Playlist: playlistTimers, Video: videoTimers, Rest: restTimes},
+		Playlist: PlaylistUploadConfig{Source: "", Destination: ""},
+		Schedule: ScheduleSettings{Playlist: syncSchedule.Times, Video: syncSchedule.Times, Rest: restTimes},
 		Audio:    audioSettings,
 	}})
 }
 
-// HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
+// HandleConfigurationUpdate updates schedule timers and audio output together.
 func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
@@ -624,13 +610,6 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	var req ConfigurationSettings
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON в теле запроса"})
-		return
-	}
-
-	playlistSource := strings.TrimSpace(req.Playlist.Source)
-	playlistDestination := strings.TrimSpace(req.Playlist.Destination)
-	if playlistSource == "" || playlistDestination == "" {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поля source и destination обязательны"})
 		return
 	}
 
@@ -655,30 +634,24 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
+	// Merge playlist and video times for sync schedule
+	var syncTimes []string
+	if len(req.Schedule.Playlist) > 0 {
+		syncTimes = req.Schedule.Playlist
+	} else if len(req.Schedule.Video) > 0 {
+		syncTimes = req.Schedule.Video
+	} else {
+		syncTimes = []string{}
+	}
+
+	normalizedSyncTimes, err := normalizeTimes(syncTimes)
 	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки плейлиста: %v", err)})
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера синхронизации: %v", err)})
 		return
 	}
 
-	normalizedVideo, err := normalizeTimes(req.Schedule.Video)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Неправильный формат таймера загрузки видео: %v", err)})
-		return
-	}
-
-	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, playlistDestination); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err)})
-		return
-	}
-
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err)})
-		return
-	}
-
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err)})
+	if err := SetSyncSchedule(normalizedSyncTimes); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить расписание синхронизации: %v", err)})
 		return
 	}
 
@@ -924,7 +897,7 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 		})
 }
 
-// HandleScheduleGet returns the configured update timers for playlist and video uploads.
+// HandleScheduleGet returns the configured update timers for sync and rest periods.
 func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
@@ -934,23 +907,8 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err),
-		})
-		return
-	}
+	// Get sync schedule (replaces both playlist and video timers)
+	syncSchedule := GetSyncSchedule()
 
 	restTimes, err := getRestTimes()
 	if err != nil {
@@ -961,11 +919,12 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Return sync times for both playlist and video for backward compatibility
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: ScheduleResponse{
-			Playlist: playlistTimers,
-			Video:    videoTimers,
+			Playlist: syncSchedule.Times,
+			Video:    syncSchedule.Times,
 			Rest:     restTimes,
 		},
 	})
@@ -1020,36 +979,33 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		restPairs = pairs
 	}
 
-	normalizedPlaylist, err := normalizeTimes(req.Playlist)
+	// Merge playlist and video times for sync schedule
+	// Use playlist times preferentially, fall back to video times if playlist is empty
+	var syncTimes []string
+	if len(req.Playlist) > 0 {
+		syncTimes = req.Playlist
+	} else if len(req.Video) > 0 {
+		syncTimes = req.Video
+	} else {
+		// If both are empty, use an empty schedule
+		syncTimes = []string{}
+	}
+
+	// Normalize times
+	normalizedSyncTimes, err := normalizeTimes(syncTimes)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось обработать время синхронизации: %v", err),
 		})
 		return
 	}
 
-	normalizedVideo, err := normalizeTimes(req.Video)
-	if err != nil {
+	// Update sync schedule
+	if err := SetSyncSchedule(normalizedSyncTimes); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err),
+			ErrMsg: fmt.Sprintf("Не удалось обновить расписание синхронизации: %v", err),
 		})
 		return
 	}
