@@ -85,12 +85,14 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/playback/stop` — остановить воспроизведение
 - `POST /api/menu/playback/start` — запустить воспроизведение
 - `GET /api/menu/storage/check` — проверка Яндекс.Диска
-- `GET /api/menu/playlist/get` — получение настроек сервиса загрузки плейлистов
-- `PUT /api/menu/playlist/update` — обновление настроек сервиса загрузки плейлистов
-- `POST /api/menu/playlist/start-upload` — начать загрузку плейлиста (запустить `playlist.upload.service`)
-- `POST /api/menu/playlist/stop-upload` — остановить загрузку плейлиста (остановить `playlist.upload.service`)
-- `GET /api/menu/schedule/get` — получить расписание обновления плейлиста, видео и интервалов отдыха
-- `PUT /api/menu/schedule/update` — обновить расписание плейлиста, видео и интервалов отдыха (crontab)
+- `GET /api/menu/service/status` — получить статус сервисов (воспроизведение, синхронизация, монтирование)
+- `POST /api/menu/sync/start` — запустить синхронизацию видео вручную
+- `GET /api/menu/sync/schedule/get` — получить расписание автоматической синхронизации
+- `PUT /api/menu/sync/schedule/update` — обновить расписание автоматической синхронизации
+- `GET /api/menu/schedule/get` — получить расписание синхронизации и интервалов отдыха
+- `PUT /api/menu/schedule/update` — обновить расписание синхронизации и интервалов отдыха (crontab)
+- `GET /api/menu/configuration/get` — получить конфигурацию расписания и аудио
+- `PUT /api/menu/configuration/update` — обновить конфигурацию расписания и аудио
 - `GET /api/menu/audio/get` — получить текущие настройки аудио
 - `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)
@@ -131,6 +133,15 @@ allowed_units:
 server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
+
+# Синхронизация видео
+core_api_base: "https://your-server.com"
+device_auth_token: "device-token"
+media_dir: "/var/lib/media-pi/videos"
+sync:
+  enabled: true
+  interval_seconds: 300
+  max_parallel_downloads: 2
 ```
 
 Параметры конфигурации:
@@ -139,6 +150,47 @@ media_pi_service_user: "pi"
 - `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
 - `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`). Этот параметр определяет, от имени какого пользователя будут выполняться операции управления расписанием интервалов отдыха через API `/api/menu/schedule/get` и `/api/menu/schedule/update`
+
+#### Параметры синхронизации видео
+
+- `core_api_base` — URL API media-pi.core backend для синхронизации видео
+- `device_auth_token` — токен аутентификации устройства (устанавливается при регистрации устройства)
+- `media_dir` — директория для хранения видеофайлов (по умолчанию: `/var/lib/media-pi/videos`)
+- `sync.enabled` — включить/выключить автоматическую синхронизацию (по умолчанию: `true`)
+- `sync.interval_seconds` — интервал между синхронизациями в секундах, используется если не задано расписание (по умолчанию: `300` = 5 минут)
+- `sync.max_parallel_downloads` — максимальное количество параллельных загрузок файлов (по умолчанию: `2`)
+
+### Синхронизация видео
+
+Агент автоматически синхронизирует видеофайлы с backend сервером media-pi.core. Синхронизация выполняется:
+
+1. **По расписанию** — можно настроить через API `/api/menu/sync/schedule/update` или `/api/menu/schedule/update`
+2. **По интервалу** — если расписание не задано, используется `sync.interval_seconds`
+3. **Вручную** — через API `/api/menu/sync/start`
+
+Процесс синхронизации:
+- Получает список файлов (manifest) с backend API `/api/devicesync`
+- Сравнивает локальные файлы с manifest по SHA256 hash и размеру
+- Загружает отсутствующие или устаревшие файлы через `/api/devicesync/{id}`
+- Проверяет SHA256 hash и размер загруженных файлов
+- Атомарно заменяет файлы (через временный файл и rename)
+- Удаляет файлы, которых нет в manifest (garbage collection)
+
+Статус синхронизации доступен через API `/api/menu/service/status`:
+```json
+{
+  "ok": true,
+  "data": {
+    "playbackServiceStatus": true,
+    "yaDiskMountStatus": false,
+    "syncEnabled": true,
+    "syncInProgress": false,
+    "syncLastTime": "2026-02-25T15:30:00Z",
+    "syncLastOk": true,
+    "syncLastError": ""
+  }
+}
+```
 
 ## Устранение неполадок
 
