@@ -1679,12 +1679,16 @@ func TestCancelSync(t *testing.T) {
 		syncDone <- TriggerSync(ctx)
 	}()
 
-	// Wait a bit for sync to start
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify sync is in progress
-	if !IsSyncInProgress() {
-		t.Fatal("sync should be in progress before cancellation")
+	// Wait for sync to start, up to a timeout
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if IsSyncInProgress() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("sync did not start within timeout")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Cancel the sync
