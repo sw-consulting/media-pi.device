@@ -868,7 +868,7 @@ func TestCalculateNextSyncTime_InvalidFormat(t *testing.T) {
 	}
 	if next.Hour() != 14 || next.Minute() != 30 {
 		// Could be tomorrow if past 14:30
-		if !(next.Hour() == 14 && next.Minute() == 30) {
+		if next.Hour() != 14 || next.Minute() != 30 {
 			t.Errorf("expected 14:30, got %02d:%02d", next.Hour(), next.Minute())
 		}
 	}
@@ -1450,7 +1450,11 @@ func TestVerifyLocalFile_ReadError(t *testing.T) {
 	if err := os.Chmod(testFile, 0000); err != nil {
 		t.Skip("cannot change file permissions on this system")
 	}
-	defer os.Chmod(testFile, 0644) // Restore for cleanup
+	defer func() {
+		if err := os.Chmod(testFile, 0644); err != nil {
+			t.Logf("failed to restore file permissions: %v", err)
+		}
+	}()
 
 	item := ManifestItem{
 		Filename:      "test.mp4",
