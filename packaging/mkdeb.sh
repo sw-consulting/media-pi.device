@@ -171,6 +171,27 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
+# Disable and stop old playlist/video upload systemd units if they exist (for upgrades)
+for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        echo "Stopping old unit: $unit"
+        systemctl stop "$unit" || true
+    fi
+    if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        echo "Disabling old unit: $unit"
+        systemctl disable "$unit" || true
+    fi
+done
+
+# Check if media directory exists, warn if not
+MEDIA_DIR="${MEDIA_DIR:-/var/lib/media-pi}"
+if [ ! -d "$MEDIA_DIR" ]; then
+    echo "Warning: Media directory $MEDIA_DIR does not exist."
+    echo "Creating directory with correct permissions..."
+    mkdir -p "$MEDIA_DIR" || echo "Warning: Failed to create $MEDIA_DIR. Please create it manually."
+    chmod 755 "$MEDIA_DIR" || true
+fi
+
 # Reload systemd daemon to pick up new/updated service file
 systemctl daemon-reload || true
 
@@ -188,6 +209,8 @@ if [ "$1" = "configure" ]; then
     else
         # Upgrade from previous version
         echo "Media Pi Agent upgraded successfully."
+        echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
+        echo "The agent now uses an internal sync scheduler instead."
         
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
