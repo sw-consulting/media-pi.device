@@ -61,6 +61,10 @@ var (
 	// syncSchedulerRunning tracks whether the scheduler is active.
 	syncSchedulerRunning     bool
 	syncSchedulerRunningLock sync.Mutex
+
+	// syncCancelFunc holds the cancel function for the currently running sync.
+	syncCancelFunc     context.CancelFunc
+	syncCancelFuncLock sync.Mutex
 )
 
 // SetSyncSchedule saves the sync schedule to disk.
@@ -279,6 +283,13 @@ func verifyLocalFile(path string, item ManifestItem) bool {
 
 // syncFiles performs the actual file synchronization.
 func syncFiles(ctx context.Context) error {
+	// Check for cancellation before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Ensure media directory exists
 	if err := os.MkdirAll(MediaDir, 0755); err != nil {
 		return fmt.Errorf("failed to create media directory: %w", err)
@@ -309,6 +320,13 @@ func syncFiles(ctx context.Context) error {
 
 	log.Printf("Found %d files to download", len(toDownload))
 
+	// Check for cancellation before downloads
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Download files with parallelization
 	if len(toDownload) > 0 {
 		sem := make(chan struct{}, MaxParallelDownloads)
@@ -317,6 +335,15 @@ func syncFiles(ctx context.Context) error {
 		var firstErr error
 
 		for _, item := range toDownload {
+			// Check for cancellation before each download
+			select {
+			case <-ctx.Done():
+				// Wait for currently running downloads to finish
+				wg.Wait()
+				return ctx.Err()
+			default:
+			}
+
 			wg.Add(1)
 			go func(item ManifestItem) {
 				defer wg.Done()
@@ -378,10 +405,26 @@ func TriggerSync(ctx context.Context) error {
 	}
 	defer syncInProgressMutex.Unlock()
 
+	// Create a cancellable context for this sync operation
+	syncCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Store cancel function so it can be called by CancelSync
+	syncCancelFuncLock.Lock()
+	syncCancelFunc = cancel
+	syncCancelFuncLock.Unlock()
+
+	// Clear cancel function when sync completes
+	defer func() {
+		syncCancelFuncLock.Lock()
+		syncCancelFunc = nil
+		syncCancelFuncLock.Unlock()
+	}()
+
 	log.Println("Starting sync...")
 
 	startTime := time.Now()
-	err := syncFiles(ctx)
+	err := syncFiles(syncCtx)
 
 	status := SyncStatus{
 		LastSyncTime: startTime,
@@ -530,4 +573,25 @@ func IsSyncSchedulerRunning() bool {
 	syncSchedulerRunningLock.Lock()
 	defer syncSchedulerRunningLock.Unlock()
 	return syncSchedulerRunning
+}
+
+// IsSyncInProgress returns whether a sync operation is currently running.
+func IsSyncInProgress() bool {
+	syncCancelFuncLock.Lock()
+	defer syncCancelFuncLock.Unlock()
+	return syncCancelFunc != nil
+}
+
+// CancelSync cancels the currently running sync operation if any.
+// Returns true if a sync was cancelled, false if no sync was running.
+func CancelSync() bool {
+	syncCancelFuncLock.Lock()
+	defer syncCancelFuncLock.Unlock()
+	
+	if syncCancelFunc != nil {
+		log.Println("Cancelling sync operation...")
+		syncCancelFunc()
+		return true
+	}
+	return false
 }
