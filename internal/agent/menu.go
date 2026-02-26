@@ -853,7 +853,8 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	// Use the main application context instead of creating a new one
+	ctx := GetMainAppContext()
 
 	// Start the sync scheduler if not already running
 	if !IsSyncSchedulerRunning() {
@@ -910,7 +911,8 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	// Use the main application context instead of creating a new one
+	ctx := GetMainAppContext()
 
 	// Start the sync scheduler if not already running
 	if !IsSyncSchedulerRunning() {
