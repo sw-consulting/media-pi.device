@@ -473,7 +473,8 @@ func TriggerSync(ctx context.Context) error {
 		syncCancelFuncLock.Lock()
 		syncCancelFunc = nil
 		syncCancelFuncLock.Unlock()
-		cancel() // Clean up the context
+		// Call cancel to free context resources. Safe to call multiple times.
+		cancel()
 	}()
 
 	log.Println("Starting sync...")
