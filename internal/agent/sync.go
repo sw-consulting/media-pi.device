@@ -304,13 +304,15 @@ func validateFilename(filename string, mediaDir string) error {
 		return fmt.Errorf("filename cannot contain path separators")
 	}
 
-	// Verify the resolved path stays within mediaDir
+	// Verify the resolved path stays within mediaDir using filepath.Rel
 	destPath := filepath.Join(mediaDir, filename)
-	cleanMediaDir := filepath.Clean(mediaDir) + string(os.PathSeparator)
-	cleanDestPath := filepath.Clean(destPath)
+	relPath, err := filepath.Rel(mediaDir, destPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve relative path: %w", err)
+	}
 
-	// Ensure the destination is within the media directory
-	if !strings.HasPrefix(cleanDestPath+string(os.PathSeparator), cleanMediaDir) && cleanDestPath != strings.TrimSuffix(cleanMediaDir, string(os.PathSeparator)) {
+	// Ensure the relative path doesn't escape the media directory
+	if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
 		return fmt.Errorf("resolved path escapes media directory")
 	}
 

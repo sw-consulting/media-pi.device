@@ -27,6 +27,7 @@ const (
 	serverReadTimeout  = 15 * time.Second
 	serverWriteTimeout = 15 * time.Second
 	serverIdleTimeout  = 60 * time.Second
+	shutdownTimeout    = 10 * time.Second
 )
 
 func main() {
@@ -131,7 +132,7 @@ func main() {
 				log.Printf("Sync scheduler stopped")
 				
 				// Gracefully shutdown HTTP server with timeout
-				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				
 				if err := server.Shutdown(shutdownCtx); err != nil {
 					log.Printf("Error during server shutdown: %v", err)
