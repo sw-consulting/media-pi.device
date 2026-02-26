@@ -11,6 +11,7 @@
 
 # Compiled binary from go build
 /media-pi.device
+/media-pi
 
 # Output of go coverage tool
 *.out
