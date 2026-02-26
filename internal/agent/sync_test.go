@@ -1708,6 +1708,9 @@ func TestCancelSync(t *testing.T) {
 	// Second cancel should return false
 	if CancelSync() {
 		t.Error("CancelSync should return false when no sync is running")
+	}
+}
+
 // TestValidateFilename tests the filename validation function.
 func TestValidateFilename(t *testing.T) {
 	mediaDir := "/var/lib/media-pi"

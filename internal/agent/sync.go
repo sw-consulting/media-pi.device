@@ -381,7 +381,6 @@ func syncFiles(ctx context.Context) error {
 		var errMutex sync.Mutex
 		var firstErr error
 
-	downloadLoop:
 		for _, item := range toDownload {
 			// Check for cancellation before each download
 			select {
@@ -651,6 +650,8 @@ func CancelSync() bool {
 		return true
 	}
 	return false
+}
+
 // GetMainAppContext returns the main application context for use in handlers.
 // If no context is available, returns context.Background().
 func GetMainAppContext() context.Context {
