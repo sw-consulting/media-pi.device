@@ -461,11 +461,19 @@ func StartSyncScheduler(ctx context.Context) {
 
 			nextSync := calculateNextSyncTime(time.Now(), schedule)
 			if nextSync.IsZero() {
-				// No schedule configured, wait indefinitely
+				// No schedule configured, wait for a short period then re-check
+				// This allows the schedule to be updated without restarting the scheduler
+				log.Println("No sync schedule configured, will check again in 5 minutes")
+				timer := time.NewTimer(5 * time.Minute)
 				select {
+				case <-timer.C:
+					// Re-check schedule
+					continue
 				case <-syncStopChan:
+					timer.Stop()
 					return
 				case <-ctx.Done():
+					timer.Stop()
 					return
 				}
 			}
@@ -501,8 +509,19 @@ func StopSyncScheduler() {
 		syncStopOnce.Do(func() {
 			close(syncStopChan)
 		})
-		// Reset the sync.Once for next start
-		syncStopOnce = sync.Once{}
+		// Wait for the scheduler goroutine to fully stop before resetting
+		// This prevents race conditions where the channel could be closed twice
+		for {
+			syncSchedulerRunningLock.Lock()
+			stillRunning := syncSchedulerRunning
+			syncSchedulerRunningLock.Unlock()
+			if !stillRunning {
+				// Now it's safe to reset for next start
+				syncStopOnce = sync.Once{}
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }
 
