@@ -886,7 +886,7 @@ func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cancelled := CancelSync()
-	
+
 	message := "Синхронизация плейлиста остановлена"
 	if !cancelled {
 		message = "Синхронизация не выполнялась"
@@ -938,7 +938,7 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cancelled := CancelSync()
-	
+
 	message := "Синхронизация видео остановлена"
 	if !cancelled {
 		message = "Синхронизация не выполнялась"

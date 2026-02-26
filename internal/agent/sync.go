@@ -587,7 +587,7 @@ func IsSyncInProgress() bool {
 func CancelSync() bool {
 	syncCancelFuncLock.Lock()
 	defer syncCancelFuncLock.Unlock()
-	
+
 	if syncCancelFunc != nil {
 		log.Println("Cancelling sync operation...")
 		syncCancelFunc()
