@@ -47,9 +47,6 @@ type SyncStatus struct {
 }
 
 var (
-	// syncInProgressMutex ensures only one sync runs at a time.
-	syncInProgressMutex sync.Mutex
-
 	// syncStatus holds the current sync status in memory.
 	syncStatus     SyncStatus
 	syncStatusLock sync.RWMutex
@@ -62,6 +59,10 @@ var (
 	syncSchedulerRunning     bool
 	syncSchedulerRunningLock sync.Mutex
 
+	// syncCancelFunc holds the cancel function for the currently running sync.
+	// When non-nil, a sync is in progress. Protected by syncCancelFuncLock.
+	syncCancelFunc     context.CancelFunc
+	syncCancelFuncLock sync.Mutex
 	// mainAppContext holds the main application context for use in handlers
 	mainAppContext     context.Context
 	mainAppContextLock sync.RWMutex
@@ -321,6 +322,13 @@ func validateFilename(filename string, mediaDir string) error {
 
 // syncFiles performs the actual file synchronization.
 func syncFiles(ctx context.Context) error {
+	// Check for cancellation before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Ensure media directory exists
 	if err := os.MkdirAll(MediaDir, 0755); err != nil {
 		return fmt.Errorf("failed to create media directory: %w", err)
@@ -357,6 +365,13 @@ func syncFiles(ctx context.Context) error {
 
 	log.Printf("Found %d files to download", len(toDownload))
 
+	// Check for cancellation before downloads
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Download files with parallelization
 	if len(toDownload) > 0 {
 		sem := make(chan struct{}, MaxParallelDownloads)
@@ -364,13 +379,15 @@ func syncFiles(ctx context.Context) error {
 		var errMutex sync.Mutex
 		var firstErr error
 
-	downloadLoop:
 		for _, item := range toDownload {
-			// Check if context is cancelled before spawning goroutine
+			// Check for cancellation before starting each new download
 			select {
 			case <-ctx.Done():
-				log.Printf("Context cancelled, stopping download spawning")
-				break downloadLoop
+				// Context cancelled: wait for in-flight downloads to finish.
+				// Each downloadFile uses ctx with http.NewRequestWithContext,
+				// so HTTP operations will be cancelled when ctx is done.
+				wg.Wait()
+				return ctx.Err()
 			default:
 			}
 
@@ -435,15 +452,35 @@ func syncFiles(ctx context.Context) error {
 
 // TriggerSync manually triggers a sync operation.
 func TriggerSync(ctx context.Context) error {
-	if !syncInProgressMutex.TryLock() {
+	// Use syncCancelFuncLock to atomically check and set sync state.
+	// This prevents a race condition where CancelSync() could be called
+	// between acquiring the sync lock and setting syncCancelFunc.
+	syncCancelFuncLock.Lock()
+	if syncCancelFunc != nil {
+		syncCancelFuncLock.Unlock()
 		return fmt.Errorf("sync already in progress")
 	}
-	defer syncInProgressMutex.Unlock()
+
+	// Create a cancellable context for this sync operation
+	syncCtx, cancel := context.WithCancel(ctx)
+
+	// Store cancel function while still holding the lock
+	syncCancelFunc = cancel
+	syncCancelFuncLock.Unlock()
+
+	// Clear cancel function when sync completes
+	defer func() {
+		syncCancelFuncLock.Lock()
+		syncCancelFunc = nil
+		syncCancelFuncLock.Unlock()
+		// Call cancel to free context resources. Safe to call multiple times.
+		cancel()
+	}()
 
 	log.Println("Starting sync...")
 
 	startTime := time.Now()
-	err := syncFiles(ctx)
+	err := syncFiles(syncCtx)
 
 	status := SyncStatus{
 		LastSyncTime: startTime,
@@ -596,6 +633,27 @@ func IsSyncSchedulerRunning() bool {
 	syncSchedulerRunningLock.Lock()
 	defer syncSchedulerRunningLock.Unlock()
 	return syncSchedulerRunning
+}
+
+// IsSyncInProgress returns whether a sync operation is currently running.
+func IsSyncInProgress() bool {
+	syncCancelFuncLock.Lock()
+	defer syncCancelFuncLock.Unlock()
+	return syncCancelFunc != nil
+}
+
+// CancelSync cancels the currently running sync operation if any.
+// Returns true if a sync was cancelled, false if no sync was running.
+func CancelSync() bool {
+	syncCancelFuncLock.Lock()
+	defer syncCancelFuncLock.Unlock()
+
+	if syncCancelFunc != nil {
+		log.Println("Cancelling sync operation...")
+		syncCancelFunc()
+		return true
+	}
+	return false
 }
 
 // GetMainAppContext returns the main application context for use in handlers.

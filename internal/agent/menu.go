@@ -427,13 +427,13 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 
-	// Check if sync scheduler is running (replaces old upload service checks)
-	syncRunning := IsSyncSchedulerRunning()
+	// Check if sync is currently in progress (not scheduler status)
+	syncInProgress := IsSyncInProgress()
 
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
-		PlaylistUploadServiceStatus: syncRunning, // Now reports sync scheduler status
-		VideoUploadServiceStatus:    syncRunning, // Now reports sync scheduler status
+		PlaylistUploadServiceStatus: syncInProgress, // Now reports if sync is in progress
+		VideoUploadServiceStatus:    syncInProgress, // Now reports if sync is in progress
 		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
 	}
 
@@ -845,7 +845,7 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// HandlePlaylistStartUpload starts the in-agent sync scheduler.
+// HandlePlaylistStartUpload triggers an immediate sync.
 // This replaces the old playlist.upload.service D-Bus interaction.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -855,11 +855,6 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Use the main application context instead of creating a new one
 	ctx := GetMainAppContext()
-
-	// Start the sync scheduler if not already running
-	if !IsSyncSchedulerRunning() {
-		StartSyncScheduler(ctx)
-	}
 
 	// Trigger an immediate sync
 	go func() {
@@ -883,7 +878,7 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandlePlaylistStopUpload stops the in-agent sync scheduler.
+// HandlePlaylistStopUpload cancels any currently running sync.
 // This replaces the old playlist.upload.service D-Bus interaction.
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -891,19 +886,24 @@ func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	StopSyncScheduler()
+	cancelled := CancelSync()
+
+	message := "Синхронизация плейлиста остановлена"
+	if !cancelled {
+		message = "Синхронизация не выполнялась"
+	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "playlist-stop-upload",
 			Result:  "done",
-			Message: "Синхронизация плейлиста остановлена",
+			Message: message,
 		},
 	})
 }
 
-// HandleVideoStartUpload starts the in-agent sync scheduler.
+// HandleVideoStartUpload triggers an immediate sync.
 // This replaces the old video.upload.service D-Bus interaction.
 func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -913,11 +913,6 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Use the main application context instead of creating a new one
 	ctx := GetMainAppContext()
-
-	// Start the sync scheduler if not already running
-	if !IsSyncSchedulerRunning() {
-		StartSyncScheduler(ctx)
-	}
 
 	// Trigger an immediate sync
 	go func() {
@@ -936,7 +931,7 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleVideoStopUpload stops the in-agent sync scheduler.
+// HandleVideoStopUpload cancels any currently running sync.
 // This replaces the old video.upload.service D-Bus interaction.
 func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -944,14 +939,19 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	StopSyncScheduler()
+	cancelled := CancelSync()
+
+	message := "Синхронизация видео остановлена"
+	if !cancelled {
+		message = "Синхронизация не выполнялась"
+	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "video-stop-upload",
 			Result:  "done",
-			Message: "Синхронизация видео остановлена",
+			Message: message,
 		},
 	})
 }
