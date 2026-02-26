@@ -1562,3 +1562,162 @@ func TestSchedulerWithScheduledTime(t *testing.T) {
 		t.Error("scheduler should have stopped after context cancellation")
 	}
 }
+
+// TestValidateFilename tests the filename validation function.
+func TestValidateFilename(t *testing.T) {
+	mediaDir := "/var/lib/media-pi"
+
+	tests := []struct {
+		name     string
+		filename string
+		wantErr  bool
+	}{
+		{
+			name:     "valid filename",
+			filename: "video.mp4",
+			wantErr:  false,
+		},
+		{
+			name:     "valid filename with extension",
+			filename: "my-video_01.mp4",
+			wantErr:  false,
+		},
+		{
+			name:     "empty filename",
+			filename: "",
+			wantErr:  true,
+		},
+		{
+			name:     "path traversal with ..",
+			filename: "../etc/passwd",
+			wantErr:  true,
+		},
+		{
+			name:     "path traversal in middle",
+			filename: "foo/../../../etc/passwd",
+			wantErr:  true,
+		},
+		{
+			name:     "absolute path",
+			filename: "/etc/passwd",
+			wantErr:  true,
+		},
+		{
+			name:     "forward slash separator",
+			filename: "subdir/video.mp4",
+			wantErr:  true,
+		},
+		{
+			name:     "backward slash separator",
+			filename: "subdir\\video.mp4",
+			wantErr:  true,
+		},
+		{
+			name:     "hidden file",
+			filename: ".hidden",
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFilename(tt.filename, mediaDir)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateFilename() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestSyncFiles_InvalidFilenames tests that invalid filenames in manifest are skipped.
+func TestSyncFiles_InvalidFilenames(t *testing.T) {
+	oldMediaDir := MediaDir
+	oldMaxParallel := MaxParallelDownloads
+	oldBase := CoreAPIBase
+	oldToken := DeviceAuthToken
+	defer func() {
+		MediaDir = oldMediaDir
+		MaxParallelDownloads = oldMaxParallel
+		CoreAPIBase = oldBase
+		DeviceAuthToken = oldToken
+	}()
+
+	tmpDir := t.TempDir()
+	MediaDir = tmpDir
+	MaxParallelDownloads = 2
+
+	// Create a test server with malicious filenames in manifest
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/devicesync":
+			manifest := []ManifestItem{
+				{
+					ID:            "1",
+					Filename:      "valid.mp4",
+					FileSizeBytes: 4,
+					SHA256:        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", // sha256("test")
+				},
+				{
+					ID:            "2",
+					Filename:      "../../../etc/passwd",
+					FileSizeBytes: 100,
+					SHA256:        "invalid",
+				},
+				{
+					ID:            "3",
+					Filename:      "/absolute/path",
+					FileSizeBytes: 100,
+					SHA256:        "invalid",
+				},
+				{
+					ID:            "4",
+					Filename:      "subdir/file.mp4",
+					FileSizeBytes: 100,
+					SHA256:        "invalid",
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(manifest)
+		case "/api/devicesync/1":
+			_, _ = w.Write([]byte("test"))
+		}
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	CoreAPIBase = server.URL
+	DeviceAuthToken = "test-token"
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	// Verify only the valid file was downloaded
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Errorf("expected 1 file, got %d", len(entries))
+	}
+
+	if len(entries) > 0 && entries[0].Name() != "valid.mp4" {
+		t.Errorf("expected valid.mp4, got %s", entries[0].Name())
+	}
+
+	// Verify no files were created outside the media directory
+	parentDir := filepath.Dir(tmpDir)
+	parentEntries, err := os.ReadDir(parentDir)
+	if err != nil {
+		t.Fatalf("ReadDir parent failed: %v", err)
+	}
+
+	for _, entry := range parentEntries {
+		if entry.Name() == "passwd" || entry.Name() == "etc" {
+			t.Errorf("found suspicious file in parent directory: %s", entry.Name())
+		}
+	}
+}

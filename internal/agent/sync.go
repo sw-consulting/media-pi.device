@@ -61,6 +61,10 @@ var (
 	// syncSchedulerRunning tracks whether the scheduler is active.
 	syncSchedulerRunning     bool
 	syncSchedulerRunningLock sync.Mutex
+
+	// mainAppContext holds the main application context for use in handlers
+	mainAppContext     context.Context
+	mainAppContextLock sync.RWMutex
 )
 
 // SetSyncSchedule saves the sync schedule to disk.
@@ -277,6 +281,44 @@ func verifyLocalFile(path string, item ManifestItem) bool {
 	return strings.EqualFold(computedHash, item.SHA256)
 }
 
+// validateFilename checks if a filename is safe to use and prevents path traversal attacks.
+// Returns an error if the filename is invalid or would escape the media directory.
+func validateFilename(filename string, mediaDir string) error {
+	// Check for empty filename
+	if filename == "" {
+		return fmt.Errorf("filename cannot be empty")
+	}
+
+	// Check for path traversal sequences
+	if strings.Contains(filename, "..") {
+		return fmt.Errorf("filename contains path traversal sequence")
+	}
+
+	// Check for absolute paths
+	if filepath.IsAbs(filename) {
+		return fmt.Errorf("filename cannot be an absolute path")
+	}
+
+	// Check for path separators (we only want plain filenames)
+	if strings.ContainsAny(filename, `/\`) {
+		return fmt.Errorf("filename cannot contain path separators")
+	}
+
+	// Verify the resolved path stays within mediaDir using filepath.Rel
+	destPath := filepath.Join(mediaDir, filename)
+	relPath, err := filepath.Rel(mediaDir, destPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve relative path: %w", err)
+	}
+
+	// Ensure the relative path doesn't escape the media directory
+	if strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
+		return fmt.Errorf("resolved path escapes media directory")
+	}
+
+	return nil
+}
+
 // syncFiles performs the actual file synchronization.
 func syncFiles(ctx context.Context) error {
 	// Ensure media directory exists
@@ -301,6 +343,12 @@ func syncFiles(ctx context.Context) error {
 	// Collect files that need to be downloaded
 	var toDownload []ManifestItem
 	for _, item := range manifest {
+		// Validate filename to prevent path traversal
+		if err := validateFilename(item.Filename, MediaDir); err != nil {
+			log.Printf("Warning: skipping invalid filename %q: %v", item.Filename, err)
+			continue
+		}
+
 		destPath := filepath.Join(MediaDir, item.Filename)
 		if !verifyLocalFile(destPath, item) {
 			toDownload = append(toDownload, item)
@@ -316,7 +364,16 @@ func syncFiles(ctx context.Context) error {
 		var errMutex sync.Mutex
 		var firstErr error
 
+	downloadLoop:
 		for _, item := range toDownload {
+			// Check if context is cancelled before spawning goroutine
+			select {
+			case <-ctx.Done():
+				log.Printf("Context cancelled, stopping download spawning")
+				break downloadLoop
+			default:
+			}
+
 			wg.Add(1)
 			go func(item ManifestItem) {
 				defer wg.Done()
@@ -359,6 +416,11 @@ func syncFiles(ctx context.Context) error {
 		}
 
 		filename := entry.Name()
+		// Skip temporary download files (they are cleaned up by downloadFile on error)
+		if strings.HasSuffix(filename, ".tmp") {
+			continue
+		}
+
 		if _, expected := expectedFiles[filename]; !expected {
 			path := filepath.Join(MediaDir, filename)
 			log.Printf("Removing file not in manifest: %s", filename)
@@ -442,6 +504,10 @@ func StartSyncScheduler(ctx context.Context) {
 	}
 	syncSchedulerRunning = true
 	syncStopChan = make(chan struct{})
+	// Store the main application context for use in handlers
+	mainAppContextLock.Lock()
+	mainAppContext = ctx
+	mainAppContextLock.Unlock()
 	syncSchedulerRunningLock.Unlock()
 
 	go func() {
@@ -530,4 +596,15 @@ func IsSyncSchedulerRunning() bool {
 	syncSchedulerRunningLock.Lock()
 	defer syncSchedulerRunningLock.Unlock()
 	return syncSchedulerRunning
+}
+
+// GetMainAppContext returns the main application context for use in handlers.
+// If no context is available, returns context.Background().
+func GetMainAppContext() context.Context {
+	mainAppContextLock.RLock()
+	defer mainAppContextLock.RUnlock()
+	if mainAppContext != nil {
+		return mainAppContext
+	}
+	return context.Background()
 }
