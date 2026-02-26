@@ -47,9 +47,6 @@ type SyncStatus struct {
 }
 
 var (
-	// syncInProgressMutex ensures only one sync runs at a time.
-	syncInProgressMutex sync.Mutex
-
 	// syncStatus holds the current sync status in memory.
 	syncStatus     SyncStatus
 	syncStatusLock sync.RWMutex
@@ -63,6 +60,7 @@ var (
 	syncSchedulerRunningLock sync.Mutex
 
 	// syncCancelFunc holds the cancel function for the currently running sync.
+	// When non-nil, a sync is in progress. Protected by syncCancelFuncLock.
 	syncCancelFunc     context.CancelFunc
 	syncCancelFuncLock sync.Mutex
 	// mainAppContext holds the main application context for use in handlers
@@ -382,10 +380,12 @@ func syncFiles(ctx context.Context) error {
 		var firstErr error
 
 		for _, item := range toDownload {
-			// Check for cancellation before each download
+			// Check for cancellation before starting each new download
 			select {
 			case <-ctx.Done():
-				// Wait for currently running downloads to finish
+				// Context cancelled: wait for in-flight downloads to finish.
+				// Each downloadFile uses ctx with http.NewRequestWithContext,
+				// so HTTP operations will be cancelled when ctx is done.
 				wg.Wait()
 				return ctx.Err()
 			default:
@@ -452,17 +452,19 @@ func syncFiles(ctx context.Context) error {
 
 // TriggerSync manually triggers a sync operation.
 func TriggerSync(ctx context.Context) error {
-	if !syncInProgressMutex.TryLock() {
+	// Use syncCancelFuncLock to atomically check and set sync state.
+	// This prevents a race condition where CancelSync() could be called
+	// between acquiring the sync lock and setting syncCancelFunc.
+	syncCancelFuncLock.Lock()
+	if syncCancelFunc != nil {
+		syncCancelFuncLock.Unlock()
 		return fmt.Errorf("sync already in progress")
 	}
-	defer syncInProgressMutex.Unlock()
 
 	// Create a cancellable context for this sync operation
 	syncCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
-	// Store cancel function so it can be called by CancelSync
-	syncCancelFuncLock.Lock()
+	// Store cancel function while still holding the lock
 	syncCancelFunc = cancel
 	syncCancelFuncLock.Unlock()
 
@@ -471,6 +473,7 @@ func TriggerSync(ctx context.Context) error {
 		syncCancelFuncLock.Lock()
 		syncCancelFunc = nil
 		syncCancelFuncLock.Unlock()
+		cancel() // Clean up the context
 	}()
 
 	log.Println("Starting sync...")

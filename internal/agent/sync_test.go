@@ -399,9 +399,18 @@ func TestSyncStatus(t *testing.T) {
 }
 
 func TestTriggerSync_AlreadyInProgress(t *testing.T) {
-	// Lock the mutex to simulate sync in progress
-	syncInProgressMutex.Lock()
-	defer syncInProgressMutex.Unlock()
+	// Simulate sync in progress by setting syncCancelFunc
+	syncCancelFuncLock.Lock()
+	dummyCancel := func() {} // dummy cancel function
+	syncCancelFunc = dummyCancel
+	syncCancelFuncLock.Unlock()
+
+	// Clean up after test
+	defer func() {
+		syncCancelFuncLock.Lock()
+		syncCancelFunc = nil
+		syncCancelFuncLock.Unlock()
+	}()
 
 	ctx := context.Background()
 	err := TriggerSync(ctx)
