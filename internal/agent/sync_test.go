@@ -1690,10 +1690,7 @@ func TestCancelSync(t *testing.T) {
 
 	// Wait for sync to start, up to a timeout
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if IsSyncInProgress() {
-			break
-		}
+	for !IsSyncInProgress() {
 		if time.Now().After(deadline) {
 			t.Fatal("sync did not start within timeout")
 		}
