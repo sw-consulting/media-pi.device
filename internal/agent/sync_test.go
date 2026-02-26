@@ -1607,12 +1607,17 @@ func TestIsSyncInProgress(t *testing.T) {
 		syncDone <- TriggerSync(ctx)
 	}()
 
-	// Wait a bit for sync to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for sync to report it is in progress, with a timeout
+	for i := 0; i < 50; i++ {
+		if IsSyncInProgress() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Now sync should be in progress
 	if !IsSyncInProgress() {
-		t.Error("IsSyncInProgress should return true when sync is running")
+		t.Fatalf("IsSyncInProgress should return true when sync is running")
 	}
 
 	// Signal manifest to complete
