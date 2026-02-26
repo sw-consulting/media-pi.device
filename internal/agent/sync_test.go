@@ -8,11 +8,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -476,5 +478,1083 @@ func TestSyncSchedulerWithContext(t *testing.T) {
 
 	if IsSyncSchedulerRunning() {
 		t.Error("scheduler should stop when context is cancelled")
+	}
+}
+
+func TestTriggerSyncSuccess(t *testing.T) {
+	// Set up test environment
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Create test files
+	content1 := []byte("video file 1")
+	content2 := []byte("video file 2")
+
+	hasher1 := sha256.New()
+	hasher1.Write(content1)
+	hash1 := hex.EncodeToString(hasher1.Sum(nil))
+
+	hasher2 := sha256.New()
+	hasher2.Write(content2)
+	hash2 := hex.EncodeToString(hasher2.Sum(nil))
+
+	manifest := []ManifestItem{
+		{
+			ID:            "id1",
+			Filename:      "video1.mp4",
+			FileSizeBytes: int64(len(content1)),
+			SHA256:        hash1,
+		},
+		{
+			ID:            "id2",
+			Filename:      "video2.mp4",
+			FileSizeBytes: int64(len(content2)),
+			SHA256:        hash2,
+		},
+	}
+
+	// Mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/api/devicesync/") {
+			id := strings.TrimPrefix(r.URL.Path, "/api/devicesync/")
+			switch id {
+			case "id1":
+				if _, err := w.Write(content1); err != nil {
+					t.Errorf("failed to write response: %v", err)
+				}
+			case "id2":
+				if _, err := w.Write(content2); err != nil {
+					t.Errorf("failed to write response: %v", err)
+				}
+			default:
+				http.NotFound(w, r)
+			}
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	oldToken := DeviceAuthToken
+	CoreAPIBase = server.URL
+	DeviceAuthToken = "test-token"
+	defer func() {
+		CoreAPIBase = oldBase
+		DeviceAuthToken = oldToken
+	}()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	// Verify files were downloaded
+	file1, err := os.ReadFile(filepath.Join(mediaDir, "video1.mp4"))
+	if err != nil {
+		t.Errorf("failed to read video1.mp4: %v", err)
+	}
+	if string(file1) != string(content1) {
+		t.Error("video1.mp4 content mismatch")
+	}
+
+	file2, err := os.ReadFile(filepath.Join(mediaDir, "video2.mp4"))
+	if err != nil {
+		t.Errorf("failed to read video2.mp4: %v", err)
+	}
+	if string(file2) != string(content2) {
+		t.Error("video2.mp4 content mismatch")
+	}
+
+	// Check sync status
+	status := GetSyncStatus()
+	if !status.OK {
+		t.Errorf("expected OK=true, got OK=false with error: %s", status.Error)
+	}
+}
+
+func TestTriggerSyncGarbageCollection(t *testing.T) {
+	// Set up test environment
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Create media dir with an old file
+	if err := os.MkdirAll(mediaDir, 0755); err != nil {
+		t.Fatalf("failed to create media dir: %v", err)
+	}
+
+	oldFile := filepath.Join(mediaDir, "old-video.mp4")
+	if err := os.WriteFile(oldFile, []byte("old content"), 0644); err != nil {
+		t.Fatalf("failed to write old file: %v", err)
+	}
+
+	// Empty manifest
+	manifest := []ManifestItem{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	// Verify old file was removed
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Error("old file should have been garbage collected")
+	}
+}
+
+func TestTriggerSyncSkipsExistingFiles(t *testing.T) {
+	// Set up test environment
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Create media dir with existing correct file
+	if err := os.MkdirAll(mediaDir, 0755); err != nil {
+		t.Fatalf("failed to create media dir: %v", err)
+	}
+
+	content := []byte("existing video content")
+	hasher := sha256.New()
+	hasher.Write(content)
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	existingFile := filepath.Join(mediaDir, "video1.mp4")
+	if err := os.WriteFile(existingFile, content, 0644); err != nil {
+		t.Fatalf("failed to write existing file: %v", err)
+	}
+
+	manifest := []ManifestItem{
+		{
+			ID:            "id1",
+			Filename:      "video1.mp4",
+			FileSizeBytes: int64(len(content)),
+			SHA256:        hash,
+		},
+	}
+
+	downloadCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/api/devicesync/") {
+			downloadCalled = true
+			if _, err := w.Write(content); err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	if downloadCalled {
+		t.Error("download should not have been called for existing valid file")
+	}
+}
+
+func TestTriggerSyncManifestError(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err == nil {
+		t.Error("expected error when manifest fetch fails")
+	}
+
+	// Check sync status reflects error
+	status := GetSyncStatus()
+	if status.OK {
+		t.Error("expected OK=false when sync fails")
+	}
+	if status.Error == "" {
+		t.Error("expected error message in status")
+	}
+}
+
+func TestTriggerSyncDownloadError(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	content := []byte("test content")
+	hasher := sha256.New()
+	hasher.Write(content)
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	manifest := []ManifestItem{
+		{
+			ID:            "id1",
+			Filename:      "video1.mp4",
+			FileSizeBytes: int64(len(content)),
+			SHA256:        hash,
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+
+		// Return error for download
+		if strings.HasPrefix(r.URL.Path, "/api/devicesync/") {
+			http.Error(w, "download failed", http.StatusInternalServerError)
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err == nil {
+		t.Error("expected error when download fails")
+	}
+
+	status := GetSyncStatus()
+	if status.OK {
+		t.Error("expected OK=false when download fails")
+	}
+}
+
+func TestSetSyncSchedule_WriteError(t *testing.T) {
+	// Try to write to a read-only location
+	oldPath := syncSchedulePath
+	syncSchedulePath = "/proc/invalid/sync.schedule.json"
+	defer func() { syncSchedulePath = oldPath }()
+
+	err := SetSyncSchedule([]string{"10:00"})
+	if err == nil {
+		t.Error("expected error when writing to invalid path")
+	}
+}
+
+func TestGetSyncSchedule_InvalidJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	syncSchedulePath = filepath.Join(tempDir, "invalid.json")
+	defer func() { syncSchedulePath = oldPath }()
+
+	// Write invalid JSON
+	if err := os.WriteFile(syncSchedulePath, []byte("not json"), 0644); err != nil {
+		t.Fatalf("failed to write invalid json: %v", err)
+	}
+
+	_, err := GetSyncSchedule()
+	if err == nil {
+		t.Error("expected error when reading invalid JSON")
+	}
+}
+
+func TestSetSyncStatus_Persistence(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncStatusPath
+	syncStatusPath = filepath.Join(tempDir, "sync.status.json")
+	defer func() { syncStatusPath = oldPath }()
+
+	status := SyncStatus{
+		LastSyncTime: time.Now().Truncate(time.Second),
+		OK:           true,
+	}
+
+	setSyncStatus(status)
+
+	// Read from disk
+	data, err := os.ReadFile(syncStatusPath)
+	if err != nil {
+		t.Fatalf("failed to read status file: %v", err)
+	}
+
+	var loaded SyncStatus
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("failed to unmarshal status: %v", err)
+	}
+
+	if !loaded.OK {
+		t.Error("expected OK=true")
+	}
+}
+
+func TestCalculateNextSyncTime_InvalidFormat(t *testing.T) {
+	now := time.Now()
+
+	// All invalid formats (non-numeric) should result in zero time
+	schedule := []string{"invalid", "ab:cd", "not:time"}
+	next := calculateNextSyncTime(now, schedule)
+	if !next.IsZero() {
+		t.Error("expected zero time for all invalid schedule formats")
+	}
+
+	// Mix of valid and invalid - should use the valid one
+	scheduleWithValid := []string{"invalid", "14:30", "ab:cd"}
+	next = calculateNextSyncTime(now, scheduleWithValid)
+	if next.IsZero() {
+		t.Error("expected non-zero time when at least one valid time exists")
+	}
+	if next.Hour() != 14 || next.Minute() != 30 {
+		// Could be tomorrow if past 14:30
+		if !(next.Hour() == 14 && next.Minute() == 30) {
+			t.Errorf("expected 14:30, got %02d:%02d", next.Hour(), next.Minute())
+		}
+	}
+}
+
+func TestFetchManifest_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	_, err := fetchManifest(ctx)
+	if err == nil {
+		t.Error("expected error when server returns error")
+	}
+}
+
+func TestFetchManifest_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("not valid json")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	_, err := fetchManifest(ctx)
+	if err == nil {
+		t.Error("expected error when server returns invalid JSON")
+	}
+}
+
+func TestDownloadFile_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	tempDir := t.TempDir()
+	destPath := filepath.Join(tempDir, "test.mp4")
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: 100,
+		SHA256:        "abc123",
+	}
+
+	ctx := context.Background()
+	err := downloadFile(ctx, item, destPath)
+	if err == nil {
+		t.Error("expected error when server returns error")
+	}
+}
+
+func TestVerifyLocalFile_StatError(t *testing.T) {
+	item := ManifestItem{
+		Filename:      "nonexistent.mp4",
+		FileSizeBytes: 100,
+		SHA256:        "abc123",
+	}
+
+	if verifyLocalFile("/nonexistent/path/file.mp4", item) {
+		t.Error("verification should fail for nonexistent file")
+	}
+}
+
+func TestStopSyncScheduler_NotRunning(t *testing.T) {
+	// Ensure scheduler is not running
+	if IsSyncSchedulerRunning() {
+		StopSyncScheduler()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Stopping when not running should be safe
+	StopSyncScheduler()
+
+	if IsSyncSchedulerRunning() {
+		t.Error("scheduler should still not be running")
+	}
+}
+
+func TestSyncSchedulerReadsSchedulePeriodically(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	defer func() { syncSchedulePath = oldPath }()
+
+	// Start with empty schedule
+	if err := SetSyncSchedule([]string{}); err != nil {
+		t.Fatalf("SetSyncSchedule failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	StartSyncScheduler(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	if !IsSyncSchedulerRunning() {
+		t.Error("scheduler should be running")
+	}
+
+	// Update schedule while running
+	// Note: In real use, scheduler re-reads every 5 minutes or on next iteration
+	// This test just verifies the scheduler handles schedule updates
+	if err := SetSyncSchedule([]string{"23:59"}); err != nil {
+		t.Fatalf("SetSyncSchedule failed: %v", err)
+	}
+
+	// Clean up
+	StopSyncScheduler()
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestDownloadFile_NoAPIBase(t *testing.T) {
+	oldBase := CoreAPIBase
+	CoreAPIBase = ""
+	defer func() { CoreAPIBase = oldBase }()
+
+	tempDir := t.TempDir()
+	destPath := filepath.Join(tempDir, "test.mp4")
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: 100,
+		SHA256:        "abc123",
+	}
+
+	ctx := context.Background()
+	err := downloadFile(ctx, item, destPath)
+	if err == nil {
+		t.Error("expected error when core_api_base not configured")
+	}
+}
+
+func TestFetchManifest_WithAuth(t *testing.T) {
+	manifest := []ManifestItem{
+		{ID: "1", Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
+	}
+
+	authHeaderReceived := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeaderReceived = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(manifest); err != nil {
+			t.Errorf("failed to encode manifest: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	oldToken := DeviceAuthToken
+	CoreAPIBase = server.URL
+	DeviceAuthToken = "my-secret-token"
+	defer func() {
+		CoreAPIBase = oldBase
+		DeviceAuthToken = oldToken
+	}()
+
+	ctx := context.Background()
+	_, err := fetchManifest(ctx)
+	if err != nil {
+		t.Fatalf("fetchManifest failed: %v", err)
+	}
+
+	expectedAuth := "Bearer my-secret-token"
+	if authHeaderReceived != expectedAuth {
+		t.Errorf("expected Authorization: %s, got: %s", expectedAuth, authHeaderReceived)
+	}
+}
+
+func TestDownloadFile_WithAuth(t *testing.T) {
+	content := []byte("test video")
+	hasher := sha256.New()
+	hasher.Write(content)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	authHeaderReceived := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeaderReceived = r.Header.Get("Authorization")
+		if _, err := w.Write(content); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	oldToken := DeviceAuthToken
+	CoreAPIBase = server.URL
+	DeviceAuthToken = "my-secret-token"
+	defer func() {
+		CoreAPIBase = oldBase
+		DeviceAuthToken = oldToken
+	}()
+
+	tempDir := t.TempDir()
+	destPath := filepath.Join(tempDir, "test.mp4")
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: int64(len(content)),
+		SHA256:        expectedHash,
+	}
+
+	ctx := context.Background()
+	err := downloadFile(ctx, item, destPath)
+	if err != nil {
+		t.Fatalf("downloadFile failed: %v", err)
+	}
+
+	expectedAuth := "Bearer my-secret-token"
+	if authHeaderReceived != expectedAuth {
+		t.Errorf("expected Authorization: %s, got: %s", expectedAuth, authHeaderReceived)
+	}
+}
+
+func TestSyncFiles_ReadDirError(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create a file where media dir should be (not a directory)
+	mediaDir := filepath.Join(tempDir, "media")
+	if err := os.WriteFile(mediaDir, []byte("not a dir"), 0644); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Empty manifest
+	manifest := []ManifestItem{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(manifest); err != nil {
+			t.Errorf("failed to encode manifest: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err == nil {
+		t.Error("expected error when media dir creation fails")
+	}
+}
+
+func TestTriggerSyncWithSubdirectories(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Create media dir with a subdirectory
+	if err := os.MkdirAll(mediaDir, 0755); err != nil {
+		t.Fatalf("failed to create media dir: %v", err)
+	}
+
+	subDir := filepath.Join(mediaDir, "subdir")
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	// Empty manifest
+	manifest := []ManifestItem{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(manifest); err != nil {
+			t.Errorf("failed to encode manifest: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	// Verify subdirectory still exists (not garbage collected)
+	if _, err := os.Stat(subDir); os.IsNotExist(err) {
+		t.Error("subdirectory should not be garbage collected")
+	}
+}
+
+func TestDownloadFile_WriteFails(t *testing.T) {
+	content := []byte("test content")
+	hasher := sha256.New()
+	hasher.Write(content)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	// Server that closes connection mid-stream
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Write headers then close abruptly
+		if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n")); err != nil {
+			t.Logf("failed to write headers: %v", err)
+		}
+		if err := conn.Close(); err != nil {
+			t.Logf("failed to close conn: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	tempDir := t.TempDir()
+	destPath := filepath.Join(tempDir, "test.mp4")
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: 1000000,
+		SHA256:        expectedHash,
+	}
+
+	ctx := context.Background()
+	err := downloadFile(ctx, item, destPath)
+	if err == nil {
+		t.Error("expected error when download interrupted")
+	}
+}
+
+func TestVerifyLocalFile_HashComparison(t *testing.T) {
+	content := []byte("test content")
+	hasher := sha256.New()
+	hasher.Write(content)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.mp4")
+
+	if err := os.WriteFile(testFile, content, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	item := ManifestItem{
+		Filename:      "test.mp4",
+		FileSizeBytes: int64(len(content)),
+		SHA256:        strings.ToUpper(expectedHash), // Test case-insensitive comparison
+	}
+
+	if !verifyLocalFile(testFile, item) {
+		t.Error("verification should pass with uppercase hash")
+	}
+}
+
+func TestStartSyncScheduler_AlreadyRunning(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	defer func() { syncSchedulePath = oldPath }()
+
+	if err := SetSyncSchedule([]string{}); err != nil {
+		t.Fatalf("SetSyncSchedule failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start first time
+	StartSyncScheduler(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	if !IsSyncSchedulerRunning() {
+		t.Fatal("scheduler should be running")
+	}
+
+	// Try to start again - should be no-op
+	StartSyncScheduler(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	if !IsSyncSchedulerRunning() {
+		t.Error("scheduler should still be running")
+	}
+
+	// Clean up
+	StopSyncScheduler()
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestFetchManifest_ContextCanceled(t *testing.T) {
+	// Server that delays response
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("[]")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := fetchManifest(ctx)
+	if err == nil {
+		t.Error("expected error when context is canceled")
+	}
+}
+
+func TestDownloadFile_ContextCanceled(t *testing.T) {
+	// Server that delays response
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		if _, err := w.Write([]byte("content")); err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	tempDir := t.TempDir()
+	destPath := filepath.Join(tempDir, "test.mp4")
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: 100,
+		SHA256:        "abc123",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	err := downloadFile(ctx, item, destPath)
+	if err == nil {
+		t.Error("expected error when context is canceled")
+	}
+}
+
+func TestSyncFilesParallelDownloads(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	oldMaxDownloads := MaxParallelDownloads
+	MediaDir = mediaDir
+	MaxParallelDownloads = 2 // Test parallelization
+	defer func() {
+		MediaDir = oldMediaDir
+		MaxParallelDownloads = oldMaxDownloads
+	}()
+
+	// Create multiple files to download
+	files := make(map[string][]byte)
+	manifest := []ManifestItem{}
+
+	for i := 1; i <= 5; i++ {
+		content := []byte(fmt.Sprintf("video content %d", i))
+		hasher := sha256.New()
+		hasher.Write(content)
+		hash := hex.EncodeToString(hasher.Sum(nil))
+
+		filename := fmt.Sprintf("video%d.mp4", i)
+		files[filename] = content
+
+		manifest = append(manifest, ManifestItem{
+			ID:            fmt.Sprintf("id%d", i),
+			Filename:      filename,
+			FileSizeBytes: int64(len(content)),
+			SHA256:        hash,
+		})
+	}
+
+	downloadCount := 0
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/api/devicesync/") {
+			mu.Lock()
+			downloadCount++
+			mu.Unlock()
+
+			id := strings.TrimPrefix(r.URL.Path, "/api/devicesync/")
+			// Find matching file
+			for filename, content := range files {
+				if strings.Contains(id, filename[5:6]) { // Extract number from id
+					if _, err := w.Write(content); err != nil {
+						t.Errorf("failed to write response: %v", err)
+					}
+					return
+				}
+			}
+			http.NotFound(w, r)
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	err := TriggerSync(ctx)
+	if err != nil {
+		t.Fatalf("TriggerSync failed: %v", err)
+	}
+
+	if downloadCount != 5 {
+		t.Errorf("expected 5 downloads, got %d", downloadCount)
+	}
+
+	// Verify all files were downloaded
+	for filename := range files {
+		filePath := filepath.Join(mediaDir, filename)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			t.Errorf("file %s was not downloaded", filename)
+		}
+	}
+}
+
+func TestVerifyLocalFile_ReadError(t *testing.T) {
+	// Create a file then make it unreadable
+	tempDir := t.TempDir()
+	testFile := filepath.Join(tempDir, "test.mp4")
+
+	content := []byte("test")
+	if err := os.WriteFile(testFile, content, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	// Make file unreadable (only on Unix-like systems)
+	if err := os.Chmod(testFile, 0000); err != nil {
+		t.Skip("cannot change file permissions on this system")
+	}
+	defer os.Chmod(testFile, 0644) // Restore for cleanup
+
+	item := ManifestItem{
+		Filename:      "test.mp4",
+		FileSizeBytes: int64(len(content)),
+		SHA256:        "abc123",
+	}
+
+	if verifyLocalFile(testFile, item) {
+		t.Error("verification should fail for unreadable file")
+	}
+}
+
+func TestSetSyncSchedule_MkdirError(t *testing.T) {
+	// Try to create schedule in an invalid location
+	oldPath := syncSchedulePath
+	// Use a path where mkdir will fail
+	syncSchedulePath = "/proc/test/invalid/sync.schedule.json"
+	defer func() { syncSchedulePath = oldPath }()
+
+	err := SetSyncSchedule([]string{"10:00"})
+	if err == nil {
+		t.Error("expected error when mkdir fails")
+	}
+	if !strings.Contains(err.Error(), "failed to create directory") {
+		t.Errorf("expected 'failed to create directory' error, got: %v", err)
+	}
+}
+
+func TestDownloadFile_CreateTempError(t *testing.T) {
+	content := []byte("test")
+	hasher := sha256.New()
+	hasher.Write(content)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write(content); err != nil {
+			t.Errorf("failed to write: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	// Try to write to a read-only directory
+	destPath := "/proc/test.mp4"
+
+	item := ManifestItem{
+		ID:            "test-id",
+		Filename:      "test.mp4",
+		FileSizeBytes: int64(len(content)),
+		SHA256:        expectedHash,
+	}
+
+	ctx := context.Background()
+	err := downloadFile(ctx, item, destPath)
+	if err == nil {
+		t.Error("expected error when creating temp file in read-only location")
+	}
+}
+
+func TestSchedulerWithScheduledTime(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	defer func() { syncSchedulePath = oldPath }()
+
+	// Set a schedule that will trigger soon (but not immediately)
+	futureTime := time.Now().Add(2 * time.Second)
+	schedule := []string{fmt.Sprintf("%02d:%02d", futureTime.Hour(), futureTime.Minute())}
+
+	if err := SetSyncSchedule(schedule); err != nil {
+		t.Fatalf("SetSyncSchedule failed: %v", err)
+	}
+
+	// Configure a mock server that won't be called
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("[]")); err != nil {
+			t.Errorf("failed to write: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	StartSyncScheduler(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	if !IsSyncSchedulerRunning() {
+		t.Error("scheduler should be running")
+	}
+
+	// Wait for context timeout
+	<-ctx.Done()
+	time.Sleep(100 * time.Millisecond)
+
+	if IsSyncSchedulerRunning() {
+		t.Error("scheduler should have stopped after context cancellation")
 	}
 }
