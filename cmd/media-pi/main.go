@@ -122,25 +122,20 @@ func main() {
 				}
 			case syscall.SIGINT, syscall.SIGTERM:
 				log.Printf("received %v, shutting down", sig)
-				
 				// Cancel context to stop sync scheduler
 				cancel()
-				
 				// Wait for sync scheduler to stop
 				log.Printf("Stopping sync scheduler...")
 				agent.StopSyncScheduler()
 				log.Printf("Sync scheduler stopped")
-				
 				// Gracefully shutdown HTTP server with timeout
 				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
-				
 				if err := server.Shutdown(shutdownCtx); err != nil {
 					log.Printf("Error during server shutdown: %v", err)
 				} else {
 					log.Printf("Server shutdown complete")
 				}
 				shutdownCancel()
-				
 				os.Exit(0)
 			}
 		}

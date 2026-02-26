@@ -416,7 +416,6 @@ func syncFiles(ctx context.Context) error {
 		}
 
 		filename := entry.Name()
-		
 		// Skip temporary download files (they are cleaned up by downloadFile on error)
 		if strings.HasSuffix(filename, ".tmp") {
 			continue
@@ -505,12 +504,10 @@ func StartSyncScheduler(ctx context.Context) {
 	}
 	syncSchedulerRunning = true
 	syncStopChan = make(chan struct{})
-	
 	// Store the main application context for use in handlers
 	mainAppContextLock.Lock()
 	mainAppContext = ctx
 	mainAppContextLock.Unlock()
-	
 	syncSchedulerRunningLock.Unlock()
 
 	go func() {
