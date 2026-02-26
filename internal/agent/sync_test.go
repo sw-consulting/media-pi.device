@@ -1562,3 +1562,151 @@ func TestSchedulerWithScheduledTime(t *testing.T) {
 		t.Error("scheduler should have stopped after context cancellation")
 	}
 }
+
+func TestIsSyncInProgress(t *testing.T) {
+	// Setup temporary directories for testing
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	oldStatus := syncStatusPath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	syncStatusPath = filepath.Join(tempDir, "sync.status.json")
+	defer func() {
+		syncSchedulePath = oldPath
+		syncStatusPath = oldStatus
+	}()
+
+	oldMediaDir := MediaDir
+	MediaDir = filepath.Join(tempDir, "media")
+	defer func() { MediaDir = oldMediaDir }()
+
+	oldCoreAPIBase := CoreAPIBase
+	defer func() { CoreAPIBase = oldCoreAPIBase }()
+
+	// Initially, no sync should be in progress
+	if IsSyncInProgress() {
+		t.Error("IsSyncInProgress should return false when no sync is running")
+	}
+
+	// Create a test server that delays manifest fetch to simulate a long-running sync
+	manifestDelay := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/devicesync") {
+			<-manifestDelay // Block until we signal to proceed
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `[]`) // Empty manifest for quick completion
+		}
+	}))
+	defer server.Close()
+
+	CoreAPIBase = server.URL
+
+	// Start a sync in the background
+	ctx := context.Background()
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- TriggerSync(ctx)
+	}()
+
+	// Wait a bit for sync to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Now sync should be in progress
+	if !IsSyncInProgress() {
+		t.Error("IsSyncInProgress should return true when sync is running")
+	}
+
+	// Signal manifest to complete
+	close(manifestDelay)
+
+	// Wait for sync to complete
+	err := <-syncDone
+	if err != nil {
+		t.Errorf("sync should complete successfully, got error: %v", err)
+	}
+
+	// After completion, sync should not be in progress
+	if IsSyncInProgress() {
+		t.Error("IsSyncInProgress should return false after sync completes")
+	}
+}
+
+func TestCancelSync(t *testing.T) {
+	// Setup temporary directories for testing
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	oldStatus := syncStatusPath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	syncStatusPath = filepath.Join(tempDir, "sync.status.json")
+	defer func() {
+		syncSchedulePath = oldPath
+		syncStatusPath = oldStatus
+	}()
+
+	oldMediaDir := MediaDir
+	MediaDir = filepath.Join(tempDir, "media")
+	defer func() { MediaDir = oldMediaDir }()
+
+	oldCoreAPIBase := CoreAPIBase
+	defer func() { CoreAPIBase = oldCoreAPIBase }()
+
+	// Initially, cancel should return false (no sync running)
+	if CancelSync() {
+		t.Error("CancelSync should return false when no sync is running")
+	}
+
+	// Create a test server that blocks on manifest fetch
+	manifestDelay := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/devicesync") {
+			<-manifestDelay // Block until cancelled or signal
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `[]`)
+		}
+	}))
+	defer server.Close()
+
+	CoreAPIBase = server.URL
+
+	// Start a sync in the background
+	ctx := context.Background()
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- TriggerSync(ctx)
+	}()
+
+	// Wait a bit for sync to start
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify sync is in progress
+	if !IsSyncInProgress() {
+		t.Fatal("sync should be in progress before cancellation")
+	}
+
+	// Cancel the sync
+	if !CancelSync() {
+		t.Error("CancelSync should return true when cancelling an in-progress sync")
+	}
+
+	// Close the delay channel to unblock the server (in case context cancellation doesn't work)
+	close(manifestDelay)
+
+	// Wait for sync to complete (it should fail due to cancellation)
+	err := <-syncDone
+	if err == nil {
+		t.Error("expected sync to fail after cancellation")
+	}
+	// The error could be "context canceled" or "failed to fetch manifest" depending on timing
+	if !strings.Contains(err.Error(), "context canceled") && !strings.Contains(err.Error(), "failed to fetch manifest") {
+		t.Errorf("expected context canceled or fetch manifest error, got: %v", err)
+	}
+
+	// After cancellation, sync should not be in progress
+	if IsSyncInProgress() {
+		t.Error("IsSyncInProgress should return false after cancellation")
+	}
+
+	// Second cancel should return false
+	if CancelSync() {
+		t.Error("CancelSync should return false when no sync is running")
+	}
+}
