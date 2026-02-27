@@ -35,8 +35,8 @@ sudo apt-get install -f -y
 3) Настройте и запустите сервис
 
 ```bash
-# Установите URL сервера управления (обязательно!)
-export CORE_API_BASE="https://your-server.com"
+# Установите URL сервера управления (по умолчанию https://vezyn.fvds.ru)
+export CORE_API_BASE="https://vezyn.fvds.ru"
 
 # Выполните настройку (создаст конфигурацию, зарегистрирует устройство и запустит сервис)
 sudo -E setup-media-pi.sh
@@ -80,51 +80,7 @@ sudo cp /etc/media-pi-agent/agent.yaml /root/agent.yaml.bak
 sudo systemctl status media-pi-agent
 ```
 
-## API Endpoints
-
-- `POST /api/menu/playback/stop` — остановить воспроизведение
-- `POST /api/menu/playback/start` — запустить воспроизведение
-- `GET /api/menu/storage/check` — проверка Яндекс.Диска
-- `GET /api/menu/service/status` — получить статус сервисов (воспроизведение, синхронизация, монтирование)
-- `GET /api/menu/configuration/get` — получение настроек конфигурации (плейлист, расписание, аудио)
-- `PUT /api/menu/configuration/update` — обновление настроек конфигурации
-- `POST /api/menu/playlist/start-upload` — запустить немедленную синхронизацию плейлиста и видео с перезапуском `play.video.service` после успешной синхронизации (не управляет встроенным планировщиком, который запускается автоматически и работает постоянно)
-- `POST /api/menu/playlist/stop-upload` — отменить текущую синхронизацию плейлиста (не останавливает встроенный планировщик синхронизации)
-- `POST /api/menu/video/start-upload` — запустить немедленную синхронизацию видео без перезапуска `play.video.service`, чтобы не прерывать воспроизведение (не управляет встроенным планировщиком, который запускается автоматически и работает постоянно)
-- `POST /api/menu/video/stop-upload` — отменить текущую синхронизацию видео (не останавливает встроенный планировщик синхронизации)
-- `GET /api/menu/schedule/get` — получить расписание синхронизации и интервалов отдыха
-- `PUT /api/menu/schedule/update` — обновить расписание синхронизации и интервалов отдыха
-- `GET /api/menu/audio/get` — получить текущие настройки аудио
-- `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
-- `POST /api/menu/system/reload` — применить изменения (daemon-reload)
-- `POST /api/menu/system/reboot` — перезагрузка системы
-- `POST /api/menu/system/shutdown` — выключение системы
-
-**Важно**: Начиная с версии 0.7.0, агент использует встроенную систему синхронизации вместо отдельных systemd сервисов `playlist.upload.service` и `video.upload.service`. API endpoints остались теми же для обратной совместимости, но теперь они управляют встроенным планировщиком синхронизации.
-
-## Авторизация
-
-Все API endpoints (кроме `/health`) требуют авторизации через Bearer token:
-
-```bash
-curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8081/api/units
-```
-
 ## Конфигурация
-
-### Переменные окружения
-
-Скрипт настройки `setup-media-pi.sh` поддерживает следующие переменные окружения:
-
-- `CORE_API_BASE` — URL API media-pi агента (обязательно для продакшена)
-  - По умолчанию: `https://media-pi.sw.consulting:8086`
-  - Пример: `https://your-management-server.com`
-
-Пример запуска с переменными окружения:
-
-```bash
-CORE_API_BASE="https://your-server.com" sudo -E setup-media-pi.sh
-```
 
 ### Файл конфигурации
 
@@ -148,8 +104,8 @@ max_parallel_downloads: 3
 - `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
 - `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`). Этот параметр определяет, от имени какого пользователя будут выполняться операции управления расписанием интервалов отдыха через API `/api/menu/schedule/get` и `/api/menu/schedule/update`
-- `core_api_base` — базовый URL backend API media-pi.core для синхронизации файлов (опционально, если не задан, синхронизация не будет работать)
-- `device_auth_token` — токен аутентификации устройства для доступа к backend API (опционально)
+- `core_api_base` — базовый URL backend API media-pi.core для синхронизации файлов (обязательно, по умолчанию https://vezyn.fvds.ru)
+- `device_auth_token` — токен аутентификации устройства для доступа к backend API (обязательно, устанавлиается после привязки к серверу)
 - `media_dir` — директория для хранения медиа-файлов (по умолчанию: `/var/lib/media-pi`)
 - `max_parallel_downloads` — максимальное количество одновременных загрузок файлов (по умолчанию: 3)
 

@@ -10,7 +10,7 @@ set -euo pipefail
 #   CORE_API_BASE="https://example.com"  sudo /usr/local/bin/setup-media-pi.sh
 # or (if already root):
 #   CORE_API_BASE="https://example.com"  /usr/local/bin/setup-media-pi.sh
-CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru/}"
+CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru}"
 AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 ### ---------------------------------------------
 

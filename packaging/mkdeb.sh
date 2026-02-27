@@ -239,7 +239,7 @@ if [ "$1" = "configure" ]; then
         # Update core_api_base in configuration if CORE_API_BASE environment variable is set
         # Only set if not already configured (never overwrite existing values)
         AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
-        CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru/}"
+        CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru}"
         if [ -n "${CORE_API_BASE:-}" ] && [ -f "$AGENT_CONFIG_PATH" ]; then
             # Check if core_api_base already exists with a non-empty value
             if grep -q '^core_api_base:' "$AGENT_CONFIG_PATH"; then

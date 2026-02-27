@@ -145,8 +145,8 @@ media_pi_service_user: "olduser"
 	if cfg.MaxParallelDownloads != 3 {
 		t.Errorf("expected MaxParallelDownloads default 3, got %d", cfg.MaxParallelDownloads)
 	}
-	if cfg.CoreAPIBase != "https://vezyn.fvds.ru/" {
-		t.Errorf("expected CoreAPIBase default 'https://vezyn.fvds.ru/', got %q", cfg.CoreAPIBase)
+	if cfg.CoreAPIBase != "https://vezyn.fvds.ru" {
+		t.Errorf("expected CoreAPIBase default 'https://vezyn.fvds.ru', got %q", cfg.CoreAPIBase)
 	}
 
 	// Check that server_key was regenerated (it will be different from old-key-123)
@@ -188,8 +188,8 @@ func TestSetupConfigFreshInstall(t *testing.T) {
 	if cfg.MaxParallelDownloads != 3 {
 		t.Errorf("expected MaxParallelDownloads default 3, got %d", cfg.MaxParallelDownloads)
 	}
-	if cfg.CoreAPIBase != "https://vezyn.fvds.ru/" {
-		t.Errorf("expected CoreAPIBase default 'https://vezyn.fvds.ru/', got %q", cfg.CoreAPIBase)
+	if cfg.CoreAPIBase != "https://vezyn.fvds.ru" {
+		t.Errorf("expected CoreAPIBase default 'https://vezyn.fvds.ru', got %q", cfg.CoreAPIBase)
 	}
 	if cfg.ServerKey == "" {
 		t.Error("expected server_key to be generated")
