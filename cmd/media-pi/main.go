@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -148,7 +149,7 @@ func main() {
 			}
 		}
 	}()
-	if err := server.ListenAndServe(); err != nil {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
