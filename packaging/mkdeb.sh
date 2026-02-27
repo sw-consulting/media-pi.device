@@ -67,6 +67,16 @@ install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bi
 # systemd service file --> /etc/systemd/system
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
+# Default sync schedule file.
+# This file must exist because the systemd unit uses ReadWritePaths= for it,
+# which triggers mount namespace setup and fails if the path is missing.
+cat > "${ROOT}/etc/systemd/system/sync.schedule.json" <<'EOF'
+{
+    "times": []
+}
+EOF
+chmod 0644 "${ROOT}/etc/systemd/system/sync.schedule.json"
+
 # Генерация правила polkit на этапе сборки.
 
 # Собираем массив уникальных имён единиц из agent.yaml
@@ -124,6 +134,7 @@ cat > "${WORK}/DEBIAN/conffiles" <<EOF
 /etc/media-pi-agent/agent.yaml
 /etc/polkit-1/rules.d/90-media-pi-agent.rules
 /etc/systemd/system/media-pi-agent.service
+/etc/systemd/system/sync.schedule.json
 EOF
 
 # Control file
@@ -170,6 +181,19 @@ cat > "${WORK}/DEBIAN/postinst" <<'EOF'
 set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
+
+# Ensure default sync schedule exists (older versions may not have shipped it).
+# Must be valid JSON to avoid unmarshal errors.
+SYNC_SCHEDULE="/etc/systemd/system/sync.schedule.json"
+if [ ! -f "$SYNC_SCHEDULE" ] || [ ! -s "$SYNC_SCHEDULE" ]; then
+        echo "Creating default sync schedule at $SYNC_SCHEDULE"
+        cat > "$SYNC_SCHEDULE" <<'JSON'
+{
+    "times": []
+}
+JSON
+        chmod 0644 "$SYNC_SCHEDULE" || true
+fi
 
 # Disable and stop old playlist/video upload systemd units if they exist (for upgrades)
 for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
