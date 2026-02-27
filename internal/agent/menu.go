@@ -848,49 +848,6 @@ type ScheduleUpdateRequest struct {
 	Rest     *[]RestTimePair `json:"rest"`
 }
 
-// handleUploadServiceAction executes shared logic for starting and stopping upload services.
-func handleUploadServiceAction(
-	w http.ResponseWriter,
-	r *http.Request,
-	unit string,
-	actionID string,
-	errMsg string,
-	timeoutMsg string,
-	successMsg string,
-	action func(context.Context, DBusConnection, chan string, string) error,
-) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
-		return
-	}
-
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	if err := action(ctx, conn, ch, unit); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf(errMsg, err)})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusGatewayTimeout, APIResponse{OK: false, ErrMsg: timeoutMsg})
-		return
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
-}
-
 // HandlePlaylistStartUpload triggers playlist sync (replaces old systemd upload service).
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
