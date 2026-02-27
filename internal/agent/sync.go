@@ -356,8 +356,8 @@ func syncFiles(ctx context.Context) error {
 
 	log.Printf("Fetched manifest with %d items", len(manifest))
 
-	// Build map of expected files and collect files that need to be downloaded
-	// Only include files with valid filenames to ensure garbage collection works correctly
+	// Build map of expected files for those that pass validation.
+	// Files with invalid filenames will be excluded from this map and garbage collected during cleanup.
 	expectedFiles := make(map[string]ManifestItem)
 	var toDownload []ManifestItem
 	for _, item := range manifest {

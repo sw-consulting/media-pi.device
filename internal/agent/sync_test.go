@@ -1980,23 +1980,51 @@ func TestSyncFilesGarbageCollectsInvalidFilenames(t *testing.T) {
 	MediaDir = mediaDir
 	defer func() { MediaDir = oldMediaDir }()
 
-	// Create media dir with a file that has an invalid name (will be in manifest)
+	// Create media dir with files that have invalid names
 	if err := os.MkdirAll(mediaDir, 0755); err != nil {
 		t.Fatalf("failed to create media dir: %v", err)
 	}
 
-	// Create a file with a path traversal name that should be garbage collected
-	invalidFile := filepath.Join(mediaDir, "..%2Fetc%2Fpasswd")
+	// Create a file with URL-encoded path traversal name
+	encodedFile := filepath.Join(mediaDir, "..%2Fetc%2Fpasswd")
+	if err := os.WriteFile(encodedFile, []byte("malicious content"), 0644); err != nil {
+		t.Fatalf("failed to write encoded invalid file: %v", err)
+	}
+
+	// Create a file with exact path traversal name (non-encoded)
+	invalidFile := filepath.Join(mediaDir, "..invalid")
 	if err := os.WriteFile(invalidFile, []byte("malicious content"), 0644); err != nil {
 		t.Fatalf("failed to write invalid file: %v", err)
 	}
 
-	// Manifest contains an item with invalid filename (path traversal attempt)
+	// Create a valid file that should be kept
+	validFile := filepath.Join(mediaDir, "valid-video.mp4")
+	content := []byte("valid content")
+	if err := os.WriteFile(validFile, content, 0644); err != nil {
+		t.Fatalf("failed to write valid file: %v", err)
+	}
+
+	// Compute hash for the valid file
+	hasher := sha256.New()
+	hasher.Write(content)
+	hash := hex.EncodeToString(hasher.Sum(nil))
+
+	// Manifest contains items: one with path traversal, one with "..", and one valid
 	manifest := []ManifestItem{
 		{
 			Filename:      "../etc/passwd",
 			FileSizeBytes: 17,
 			SHA256:        "0000000000000000000000000000000000000000000000000000000000000000",
+		},
+		{
+			Filename:      "..invalid",
+			FileSizeBytes: 17,
+			SHA256:        "0000000000000000000000000000000000000000000000000000000000000000",
+		},
+		{
+			Filename:      "valid-video.mp4",
+			FileSizeBytes: int64(len(content)),
+			SHA256:        hash,
 		},
 	}
 
@@ -2017,15 +2045,24 @@ func TestSyncFilesGarbageCollectsInvalidFilenames(t *testing.T) {
 	defer func() { CoreAPIBase = oldBase }()
 
 	ctx := context.Background()
-	// syncFiles should succeed (skipping the invalid file)
+	// syncFiles should succeed (skipping the invalid files)
 	if err := syncFiles(ctx); err != nil {
 		t.Fatalf("syncFiles failed: %v", err)
 	}
 
-	// Verify the file with invalid name was garbage collected
-	// (because it wasn't added to expectedFiles after validation)
+	// Verify the file with URL-encoded invalid name was garbage collected
+	if _, err := os.Stat(encodedFile); !os.IsNotExist(err) {
+		t.Error("file with URL-encoded invalid name should have been garbage collected")
+	}
+
+	// Verify the file with path traversal ".." was garbage collected
 	if _, err := os.Stat(invalidFile); !os.IsNotExist(err) {
-		t.Error("file with invalid name should have been garbage collected")
+		t.Error("file with '..' in name should have been garbage collected")
+	}
+
+	// Verify the valid file still exists
+	if _, err := os.Stat(validFile); err != nil {
+		t.Error("valid file should not have been garbage collected")
 	}
 }
 
