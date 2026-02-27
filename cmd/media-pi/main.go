@@ -90,7 +90,7 @@ func main() {
 	if listenAddr == "" {
 		listenAddr = agent.DefaultListenAddr
 	}
-	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
+	log.Printf("Starting Media Pi Agent service on %s", listenAddr)
 
 	// Create a context for the sync scheduler
 	ctx, cancel := context.WithCancel(context.Background())

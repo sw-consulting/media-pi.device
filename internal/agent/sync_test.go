@@ -155,12 +155,9 @@ func TestFetchManifest(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	ctx := context.Background()
@@ -220,12 +217,9 @@ func TestDownloadFile(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	tempDir := t.TempDir()
@@ -557,12 +551,9 @@ func TestTriggerSyncSuccess(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	ctx := context.Background()
@@ -1045,12 +1036,9 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "my-secret-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	ctx := context.Background()
@@ -1081,12 +1069,9 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "my-secret-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	tempDir := t.TempDir()
@@ -1797,12 +1782,10 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 	oldMediaDir := MediaDir
 	oldMaxParallel := MaxParallelDownloads
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	defer func() {
 		MediaDir = oldMediaDir
 		MaxParallelDownloads = oldMaxParallel
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	tmpDir := t.TempDir()
@@ -1849,7 +1832,6 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 	defer server.Close()
 
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 
 	ctx := context.Background()
 	err := TriggerSync(ctx)

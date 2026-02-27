@@ -1,7 +1,7 @@
 # media-pi.device
-Media Pi Agent REST Service для управления systemd юнитами
+Media Pi Agent Service для управления systemd юнитами
 
-[![Build & Package Media Pi Agent REST Service](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml)
+[![Build & Package Media Pi Agent Service](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml)
 [![Lint](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml)
 [![codecov](https://codecov.io/gh/sw-consulting/media-pi.device/graph/badge.svg?token=VKjKQppeYE)](https://codecov.io/gh/sw-consulting/media-pi.device)
 
@@ -93,7 +93,6 @@ server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
 core_api_base: "https://your-server.com"
-device_auth_token: "device-token"
 media_dir: "/var/lib/media-pi"
 max_parallel_downloads: 3
 ```
@@ -105,7 +104,6 @@ max_parallel_downloads: 3
 - `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`). Этот параметр определяет, от имени какого пользователя будут выполняться операции управления расписанием интервалов отдыха через API `/api/menu/schedule/get` и `/api/menu/schedule/update`
 - `core_api_base` — базовый URL backend API media-pi.core для синхронизации файлов (обязательно, по умолчанию https://vezyn.fvds.ru)
-- `device_auth_token` — токен аутентификации устройства для доступа к backend API (обязательно, устанавлиается после привязки к серверу)
 - `media_dir` — директория для хранения медиа-файлов (по умолчанию: `/var/lib/media-pi`)
 - `max_parallel_downloads` — максимальное количество одновременных загрузок файлов (по умолчанию: 3)
 
