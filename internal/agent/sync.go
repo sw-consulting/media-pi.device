@@ -70,6 +70,11 @@ var (
 	// mainAppContext holds the main application context for use in handlers
 	mainAppContext     context.Context
 	mainAppContextLock sync.RWMutex
+
+	// scheduledSyncCallback is called after successful scheduled syncs.
+	// This allows restarting services or performing other post-sync actions.
+	scheduledSyncCallback     func()
+	scheduledSyncCallbackLock sync.RWMutex
 )
 
 // SetSyncSchedule saves the sync schedule to disk.
@@ -465,7 +470,15 @@ func syncFiles(ctx context.Context) error {
 }
 
 // TriggerSync manually triggers a sync operation.
+// This is a convenience wrapper that calls TriggerSyncWithCallback with no callback.
 func TriggerSync(ctx context.Context) error {
+	return TriggerSyncWithCallback(ctx, nil)
+}
+
+// TriggerSyncWithCallback manually triggers a sync operation with an optional callback.
+// The callback is executed after a successful sync. This allows callers to perform
+// actions like restarting services based on the type of sync operation.
+func TriggerSyncWithCallback(ctx context.Context, onSuccess func()) error {
 	// Use syncCancelFuncLock to atomically check and set sync state.
 	// This prevents a race condition where CancelSync() could be called
 	// between acquiring the sync lock and setting syncCancelFunc.
@@ -505,6 +518,10 @@ func TriggerSync(ctx context.Context) error {
 		log.Printf("Sync failed: %v", err)
 	} else {
 		log.Println("Sync completed successfully")
+		// Execute the callback after successful sync
+		if onSuccess != nil {
+			onSuccess()
+		}
 	}
 
 	setSyncStatus(status)
@@ -609,7 +626,9 @@ func StartSyncScheduler(ctx context.Context) {
 			select {
 			case <-timer.C:
 				log.Println("Scheduled sync triggered")
-				if err := TriggerSync(ctx); err != nil {
+				// Scheduled syncs should restart video.play service after success
+				// because they may include playlist changes that affect playback.
+				if err := TriggerSyncWithCallback(ctx, getScheduledSyncCallback()); err != nil {
 					log.Printf("Scheduled sync error: %v", err)
 				}
 			case <-syncReloadChan:
@@ -696,4 +715,19 @@ func GetMainAppContext() context.Context {
 		return mainAppContext
 	}
 	return context.Background()
+}
+
+// SetScheduledSyncCallback sets the callback function to be called after successful scheduled syncs.
+// This allows different behavior for scheduled syncs vs manual syncs (e.g., restarting services).
+func SetScheduledSyncCallback(callback func()) {
+	scheduledSyncCallbackLock.Lock()
+	defer scheduledSyncCallbackLock.Unlock()
+	scheduledSyncCallback = callback
+}
+
+// getScheduledSyncCallback returns the callback function for scheduled syncs.
+func getScheduledSyncCallback() func() {
+	scheduledSyncCallbackLock.RLock()
+	defer scheduledSyncCallbackLock.RUnlock()
+	return scheduledSyncCallback
 }

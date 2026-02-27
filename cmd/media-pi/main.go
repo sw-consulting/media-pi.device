@@ -99,6 +99,14 @@ func main() {
 	log.Println("Starting sync scheduler...")
 	agent.StartSyncScheduler(ctx)
 
+	// Set callback for scheduled syncs to restart video.play service.
+	// Scheduled syncs may include playlist changes that affect playback.
+	agent.SetScheduledSyncCallback(func() {
+		if err := agent.RestartVideoPlayService(); err != nil {
+			log.Printf("Warning: failed to restart video.play service after scheduled sync: %v", err)
+		}
+	})
+
 	server := &http.Server{
 		Addr:         listenAddr,
 		Handler:      mux,

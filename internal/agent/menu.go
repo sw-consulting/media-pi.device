@@ -856,15 +856,16 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	// Use the main application context instead of creating a new one
 	ctx := GetMainAppContext()
 
-	// Trigger an immediate sync
+	// Trigger an immediate sync with video.play service restart
+	// Playlist syncs should always restart the service to pick up playlist changes.
 	go func() {
-		if err := TriggerSync(ctx); err != nil {
-			log.Printf("Manual playlist sync error: %v", err)
-		} else {
+		if err := TriggerSyncWithCallback(ctx, func() {
 			// After successful sync, restart video.play service
-			if err := restartVideoPlayService(); err != nil {
+			if err := RestartVideoPlayService(); err != nil {
 				log.Printf("Warning: failed to restart video.play service: %v", err)
 			}
+		}); err != nil {
+			log.Printf("Manual playlist sync error: %v", err)
 		}
 	}()
 
@@ -914,7 +915,8 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 	// Use the main application context instead of creating a new one
 	ctx := GetMainAppContext()
 
-	// Trigger an immediate sync
+	// Trigger an immediate sync without restarting video.play service.
+	// Video syncs only update video files and should not interrupt playback.
 	go func() {
 		if err := TriggerSync(ctx); err != nil {
 			log.Printf("Manual video sync error: %v", err)
@@ -956,8 +958,9 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// restartVideoPlayService restarts the video.play service after a successful sync.
-func restartVideoPlayService() error {
+// RestartVideoPlayService restarts the video.play service after a successful sync.
+// This function is exported so it can be used as a callback for scheduled syncs.
+func RestartVideoPlayService() error {
 	conn, err := getDBusConnection(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to connect to D-Bus: %w", err)
