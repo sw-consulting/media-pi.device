@@ -348,8 +348,10 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 			log.Printf("Warning: Suspicious filename '%s' for item %d, skipping", item.Filename, item.ID)
 			continue
 		}
-		cleanPath := filepath.Clean(item.Filename)
-		if cleanPath != item.Filename || filepath.IsAbs(cleanPath) {
+		// Normalize path separators for cross-platform compatibility (server uses forward slashes)
+		normalizedPath := filepath.FromSlash(item.Filename)
+		cleanPath := filepath.Clean(normalizedPath)
+		if cleanPath != normalizedPath || filepath.IsAbs(cleanPath) {
 			log.Printf("Warning: Suspicious filename '%s' for item %d, skipping", item.Filename, item.ID)
 			continue
 		}
@@ -366,8 +368,10 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' || strings.Contains(item.Filename, "..") {
 			continue
 		}
-		cleanPath := filepath.Clean(item.Filename)
-		if cleanPath != item.Filename || filepath.IsAbs(cleanPath) {
+		// Normalize path separators for cross-platform compatibility
+		normalizedPath := filepath.FromSlash(item.Filename)
+		cleanPath := filepath.Clean(normalizedPath)
+		if cleanPath != normalizedPath || filepath.IsAbs(cleanPath) {
 			continue
 		}
 

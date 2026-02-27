@@ -698,7 +698,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	for i, p := range restPairs {
 		restConfigPairs[i] = RestTimePairConfig(p)
 	}
-	
+
 	if err := UpdateConfigSettings(
 		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
@@ -1024,7 +1024,7 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// restartVideoPlayService restarts the video.play service via systemd.
+// restartVideoPlayService restarts the play.video.service via systemd.
 func restartVideoPlayService() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1036,9 +1036,9 @@ func restartVideoPlayService() error {
 	defer conn.Close()
 
 	ch := make(chan string, 1)
-	_, err = conn.RestartUnitContext(ctx, "video.play.service", "replace", ch)
+	_, err = conn.RestartUnitContext(ctx, "play.video.service", "replace", ch)
 	if err != nil {
-		return fmt.Errorf("failed to restart video.play service: %w", err)
+		return fmt.Errorf("failed to restart play.video.service: %w", err)
 	}
 
 	// Wait for result
@@ -1053,10 +1053,10 @@ func restartVideoPlayService() error {
 	}
 }
 
-// RestartVideoPlayServiceSimple restarts the video.play service using systemctl command.
+// RestartVideoPlayServiceSimple restarts the play.video.service using systemctl command.
 // This is a simpler version that can be exported and used from main.
 func RestartVideoPlayServiceSimple() error {
-	cmd := exec.Command("systemctl", "restart", "video.play.service")
+	cmd := exec.Command("systemctl", "restart", "play.video.service")
 	return cmd.Run()
 }
 
@@ -1188,7 +1188,7 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	// introduced as the new configuration store. On next agent restart, the YAML will
 	// be populated via migration if still missing.
 	cfg := GetCurrentConfig()
-	
+
 	// Preserve existing rest configuration if not provided in request
 	var restConfigPairs []RestTimePairConfig
 	if req.Rest != nil {

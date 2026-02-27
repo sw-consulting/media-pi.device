@@ -144,7 +144,7 @@ max_parallel_downloads: 3
 
 # Конфигурация плейлиста (директория для файлов определяется из destination)
 playlist:
-  destination: "/var/media-pi/playlist.json"
+  destination: "/var/media-pi/playlist.m3u"
 
 # Расписание синхронизации
 schedule:
@@ -162,7 +162,7 @@ schedule:
 
 # Конфигурация плейлиста
 playlist:
-  destination: "/var/media-pi/playlist.json"
+  destination: "/var/media-pi/playlist.m3u"
 ```
 
 ### Автоматическая синхронизация
@@ -250,7 +250,7 @@ core_api_base: "https://vezyn.fvds.ru"
 max_parallel_downloads: 3
 
 playlist:
-  destination: "/var/media-pi/playlist.json"
+  destination: "/var/media-pi/playlist.m3u"
 
 schedule:
   playlist:
@@ -274,7 +274,7 @@ audio:
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`)
 - `core_api_base` — базовый URL API сервера управления (по умолчанию: `https://vezyn.fvds.ru`)
 - `max_parallel_downloads` — максимальное количество параллельных загрузок (по умолчанию: 3, зарезервировано для будущего использования)
-- `playlist.destination` — путь для сохранения загруженного плейлиста и директория для синхронизированных медиа файлов (по умолчанию: `/var/media-pi/playlist.json`)
+- `playlist.destination` — путь для сохранения загруженного плейлиста и директория для синхронизированных медиа файлов (по умолчанию: `/var/media-pi/playlist.m3u`)
 - `schedule.playlist` — времена автоматической синхронизации плейлиста (формат HH:MM)
 - `schedule.video` — времена автоматической синхронизации видео файлов (формат HH:MM)
 - `schedule.rest` — интервалы отдыха, когда воспроизведение останавливается
