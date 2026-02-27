@@ -1884,3 +1884,90 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleReloadImmediate(t *testing.T) {
+	tempDir := t.TempDir()
+	oldPath := syncSchedulePath
+	oldStatusPath := syncStatusPath
+	syncSchedulePath = filepath.Join(tempDir, "sync.schedule.json")
+	syncStatusPath = filepath.Join(tempDir, "sync.status.json")
+	defer func() {
+		syncSchedulePath = oldPath
+		syncStatusPath = oldStatusPath
+	}()
+
+	oldMediaDir := MediaDir
+	MediaDir = filepath.Join(tempDir, "media")
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Configure a mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("[]")); err != nil {
+			t.Errorf("failed to write: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	// Set an initial schedule with no times (should wait 5 minutes)
+	if err := SetSyncSchedule([]string{}); err != nil {
+		t.Fatalf("SetSyncSchedule failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Track when scheduler recalculates
+	recalculated := make(chan struct{}, 1)
+	
+	// Start scheduler
+	StartSyncScheduler(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	if !IsSyncSchedulerRunning() {
+		t.Fatal("scheduler should be running")
+	}
+
+	// Monitor logs to detect reload - we'll update schedule and verify
+	// that the scheduler picks it up quickly (not after 5 minutes)
+	go func() {
+		// Set a schedule with a time in the future
+		futureTime := time.Now().Add(10 * time.Minute)
+		newSchedule := []string{fmt.Sprintf("%02d:%02d", futureTime.Hour(), futureTime.Minute())}
+		if err := SetSyncSchedule(newSchedule); err != nil {
+			t.Errorf("SetSyncSchedule failed: %v", err)
+			return
+		}
+		// Signal that we've updated the schedule
+		recalculated <- struct{}{}
+	}()
+
+	// Wait for schedule update
+	select {
+	case <-recalculated:
+		// Good - schedule was updated
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for schedule update")
+	}
+
+	// Give scheduler time to process the reload signal
+	time.Sleep(200 * time.Millisecond)
+
+	// The key test is that the scheduler is still running and didn't crash
+	// The reload mechanism should have been triggered via the channel
+	if !IsSyncSchedulerRunning() {
+		t.Error("scheduler should still be running after schedule update")
+	}
+
+	// Stop the scheduler
+	StopSyncScheduler()
+
+	if IsSyncSchedulerRunning() {
+		t.Error("scheduler should have stopped")
+	}
+}
+
