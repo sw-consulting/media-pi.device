@@ -132,6 +132,7 @@ func DefaultConfig() Config {
 		AllowedUnits:         []string{},
 		ListenAddr:           DefaultListenAddr,
 		MediaPiServiceUser:   "pi",
+		CoreAPIBase:          "https://vezyn.fvds.ru/",
 		MediaDir:             "/var/lib/media-pi",
 		MaxParallelDownloads: 3,
 	}
@@ -259,6 +260,9 @@ func SetupConfig(configPath string) error {
 		}
 		if config.MaxParallelDownloads <= 0 {
 			config.MaxParallelDownloads = 3
+		}
+		if config.CoreAPIBase == "" {
+			config.CoreAPIBase = "https://vezyn.fvds.ru/"
 		}
 	case errors.Is(err, os.ErrNotExist):
 		// use defaults

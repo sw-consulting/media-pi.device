@@ -21,8 +21,8 @@ listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
 
 # Base URL of the media-pi.core backend API for file synchronization (optional)
-# If not set, file synchronization will not work
-# Example: https://media-pi.sw.consulting:8086
+# If not set, defaults to https://vezyn.fvds.ru/
+# Example: https://vezyn.fvds.ru/
 core_api_base: ""
 
 # Device authentication token for backend API access (optional)
