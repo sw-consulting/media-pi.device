@@ -14,13 +14,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
 )
 
-const (
+var (
 	syncScheduleFilePath = "/etc/systemd/system/sync.schedule.json"
 	syncStatusFilePath   = "/var/lib/media-pi-agent/sync-status.json"
 )
@@ -336,6 +337,11 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 			log.Printf("Warning: Invalid filename '%s' for item %d, skipping", item.Filename, item.ID)
 			continue
 		}
+		// Check for path traversal attempts
+		if strings.Contains(item.Filename, "..") {
+			log.Printf("Warning: Suspicious filename '%s' for item %d, skipping", item.Filename, item.ID)
+			continue
+		}
 		cleanPath := filepath.Clean(item.Filename)
 		if cleanPath != item.Filename || filepath.IsAbs(cleanPath) {
 			log.Printf("Warning: Suspicious filename '%s' for item %d, skipping", item.Filename, item.ID)
@@ -351,8 +357,11 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	var downloadErrors []string
 	for _, item := range manifest.Items {
 		// Skip invalid filenames (already validated above)
+		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' || strings.Contains(item.Filename, "..") {
+			continue
+		}
 		cleanPath := filepath.Clean(item.Filename)
-		if cleanPath != item.Filename || filepath.IsAbs(cleanPath) || item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' {
+		if cleanPath != item.Filename || filepath.IsAbs(cleanPath) {
 			continue
 		}
 
