@@ -132,6 +132,7 @@ func DefaultConfig() Config {
 		AllowedUnits:         []string{},
 		ListenAddr:           DefaultListenAddr,
 		MediaPiServiceUser:   "pi",
+		CoreAPIBase:          "https://vezyn.fvds.ru/",
 		MediaDir:             "/var/lib/media-pi",
 		MaxParallelDownloads: 3,
 	}
@@ -247,8 +248,21 @@ func SetupConfig(configPath string) error {
 		if config.ServerKey != "" {
 			fmt.Printf("Warning: configuration at %s already has a server_key; it will be overwritten\n", configPath)
 		}
+		// Apply defaults for any missing fields (important for upgrades from older versions)
 		if config.ListenAddr == "" {
 			config.ListenAddr = DefaultListenAddr
+		}
+		if config.MediaPiServiceUser == "" {
+			config.MediaPiServiceUser = "pi"
+		}
+		if config.MediaDir == "" {
+			config.MediaDir = "/var/lib/media-pi"
+		}
+		if config.MaxParallelDownloads <= 0 {
+			config.MaxParallelDownloads = 3
+		}
+		if config.CoreAPIBase == "" {
+			config.CoreAPIBase = "https://vezyn.fvds.ru/"
 		}
 	case errors.Is(err, os.ErrNotExist):
 		// use defaults

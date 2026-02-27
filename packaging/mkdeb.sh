@@ -236,6 +236,33 @@ if [ "$1" = "configure" ]; then
         echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
         echo "The agent now uses an internal sync scheduler instead."
         
+        # Update core_api_base in configuration if CORE_API_BASE environment variable is set
+        # Only set if not already configured (never overwrite existing values)
+        AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
+        CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru/}"
+        if [ -n "${CORE_API_BASE:-}" ] && [ -f "$AGENT_CONFIG_PATH" ]; then
+            # Check if core_api_base already exists with a non-empty value
+            if grep -q '^core_api_base:' "$AGENT_CONFIG_PATH"; then
+                # Check if it's empty (empty string, null, or just whitespace after the colon)
+                CURRENT_VALUE=$(grep '^core_api_base:' "$AGENT_CONFIG_PATH" | sed 's/^core_api_base:[[:space:]]*//' | tr -d '"' | tr -d "'")
+                if [ -z "${CURRENT_VALUE}" ]; then
+                    echo "Setting core_api_base to ${CORE_API_BASE} in configuration..."
+                    sed -i "s|^core_api_base:.*|core_api_base: \"${CORE_API_BASE}\"|" "$AGENT_CONFIG_PATH"
+                else
+                    echo "core_api_base is already set, not overwriting..."
+                fi
+            else
+                # Add new line - try after media_pi_service_user, otherwise append to end
+                echo "Setting core_api_base to ${CORE_API_BASE} in configuration..."
+                if grep -q '^media_pi_service_user:' "$AGENT_CONFIG_PATH"; then
+                    sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "$AGENT_CONFIG_PATH"
+                else
+                    # Fallback: append to end of file if anchor not found
+                    echo "core_api_base: \"${CORE_API_BASE}\"" >> "$AGENT_CONFIG_PATH"
+                fi
+            fi
+        fi
+        
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
             echo "Restarting media-pi-agent service..."

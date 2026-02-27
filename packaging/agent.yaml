@@ -14,8 +14,23 @@ allowed_units:
 # Server key for API authentication (generate with: media-pi-agent setup)
 server_key: ""
 
-# Listen address for REST API
+# Listen address for REST API (default: 0.0.0.0:8081)
 listen_addr: "0.0.0.0:8081"
 
 # Username for media-pi service operations (crontab and systemd timers, default: pi)
 media_pi_service_user: "pi"
+
+# Base URL of the media-pi.core backend API for file synchronization (optional)
+# If not set, defaults to https://vezyn.fvds.ru/
+# Example: https://vezyn.fvds.ru/
+core_api_base: ""
+
+# Device authentication token for backend API access (optional)
+# This token is used to authenticate with the core API
+device_auth_token: ""
+
+# Directory for storing media files (default: /var/lib/media-pi)
+media_dir: "/var/lib/media-pi"
+
+# Maximum number of concurrent file downloads during synchronization (default: 3)
+max_parallel_downloads: 3
