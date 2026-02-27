@@ -34,7 +34,6 @@ type Config struct {
 	ListenAddr           string   `yaml:"listen_addr,omitempty"`
 	MediaPiServiceUser   string   `yaml:"media_pi_service_user,omitempty"`
 	CoreAPIBase          string   `yaml:"core_api_base,omitempty"`
-	DeviceAuthToken      string   `yaml:"device_auth_token,omitempty"`
 	MediaDir             string   `yaml:"media_dir,omitempty"`
 	MaxParallelDownloads int      `yaml:"max_parallel_downloads,omitempty"`
 }
@@ -89,9 +88,6 @@ var (
 
 	// CoreAPIBase is the base URL of the media-pi.core backend API.
 	CoreAPIBase string
-
-	// DeviceAuthToken is the authentication token for the device.
-	DeviceAuthToken string
 
 	// MediaDir is the directory where media files are stored.
 	MediaDir string
@@ -184,7 +180,6 @@ func LoadConfigFrom(path string) (*Config, error) {
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
 	CoreAPIBase = c.CoreAPIBase
-	DeviceAuthToken = c.DeviceAuthToken
 	MediaDir = c.MediaDir
 	MaxParallelDownloads = c.MaxParallelDownloads
 

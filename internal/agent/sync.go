@@ -171,8 +171,8 @@ func fetchManifest(ctx context.Context) ([]ManifestItem, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if DeviceAuthToken != "" {
-		req.Header.Set("Authorization", "Bearer "+DeviceAuthToken)
+	if ServerKey != "" {
+		req.Header.Set("X-Device-Id", ServerKey)
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -210,8 +210,8 @@ func downloadFile(ctx context.Context, item ManifestItem, destPath string) error
 		return fmt.Errorf("failed to create download request: %w", err)
 	}
 
-	if DeviceAuthToken != "" {
-		req.Header.Set("Authorization", "Bearer "+DeviceAuthToken)
+	if ServerKey != "" {
+		req.Header.Set("X-Device-Id", ServerKey)
 	}
 
 	client := &http.Client{Timeout: 5 * time.Minute}

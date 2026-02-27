@@ -14,7 +14,7 @@ CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru}"
 AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 ### ---------------------------------------------
 
-echo "Setting up Media Pi Agent REST Service..."
+echo "Setting up Media Pi Agent Service..."
 
 # Dependencies (curl, jq) are provided by package dependencies
 # Verify they are available
@@ -174,7 +174,7 @@ fi
 
 echo ""
 echo "Setup completed successfully!"
-echo "Media Pi Agent REST service is running on ${DEVICE_IP}:${AGENT_PORT}"
+echo "Media Pi Agent service is running on ${DEVICE_IP}:${AGENT_PORT}"
 echo "Server key: ${SERVER_KEY}"
 echo ""
 echo "API endpoints available:"

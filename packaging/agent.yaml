@@ -25,10 +25,6 @@ media_pi_service_user: "pi"
 # Example: https://vezyn.fvds.ru
 core_api_base: "https://vezyn.fvds.ru"
 
-# Device authentication token for backend API access (optional)
-# This token is used to authenticate with the core API
-device_auth_token: ""
-
 # Directory for storing media files (default: /var/lib/media-pi)
 media_dir: "/var/lib/media-pi"
 

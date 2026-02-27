@@ -1,7 +1,7 @@
 # Copyright (c) 2025 sw.consulting
 # This file is a part of Media Pi device agent
 
-name: Build & Package Media Pi Agent REST Service
+name: Build & Package Media Pi Agent Service
 
 concurrency:
   group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'

@@ -1,5 +1,5 @@
 [Unit]
-Description=Media Pi Agent REST Service
+Description=Media Pi Agent Service
 Documentation=https://github.com/sw-consulting/media-pi.device
 After=network.target
 Wants=network.target

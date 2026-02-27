@@ -155,12 +155,9 @@ func TestFetchManifest(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	ctx := context.Background()
@@ -220,12 +217,9 @@ func TestDownloadFile(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	tempDir := t.TempDir()
@@ -557,12 +551,9 @@ func TestTriggerSyncSuccess(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	ctx := context.Background()
@@ -1034,9 +1025,9 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 		{ID: "1", Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
 	}
 
-	authHeaderReceived := ""
+	deviceIDReceived := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeaderReceived = r.Header.Get("Authorization")
+		deviceIDReceived = r.Header.Get("X-Device-Id")
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(manifest); err != nil {
 			t.Errorf("failed to encode manifest: %v", err)
@@ -1045,12 +1036,15 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "my-secret-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
+	}()
+
+	oldServerKey := ServerKey
+	ServerKey = "test-device-key"
+	defer func() {
+		ServerKey = oldServerKey
 	}()
 
 	ctx := context.Background()
@@ -1059,9 +1053,9 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 		t.Fatalf("fetchManifest failed: %v", err)
 	}
 
-	expectedAuth := "Bearer my-secret-token"
-	if authHeaderReceived != expectedAuth {
-		t.Errorf("expected Authorization: %s, got: %s", expectedAuth, authHeaderReceived)
+	expectedDeviceID := "test-device-key"
+	if deviceIDReceived != expectedDeviceID {
+		t.Errorf("expected X-Device-Id: %s, got: %s", expectedDeviceID, deviceIDReceived)
 	}
 }
 
@@ -1071,9 +1065,9 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 	hasher.Write(content)
 	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 
-	authHeaderReceived := ""
+	deviceIDReceived := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeaderReceived = r.Header.Get("Authorization")
+		deviceIDReceived = r.Header.Get("X-Device-Id")
 		if _, err := w.Write(content); err != nil {
 			t.Errorf("failed to write response: %v", err)
 		}
@@ -1081,12 +1075,15 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 	defer server.Close()
 
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "my-secret-token"
 	defer func() {
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
+	}()
+
+	oldServerKey := ServerKey
+	ServerKey = "test-device-key"
+	defer func() {
+		ServerKey = oldServerKey
 	}()
 
 	tempDir := t.TempDir()
@@ -1105,9 +1102,9 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 		t.Fatalf("downloadFile failed: %v", err)
 	}
 
-	expectedAuth := "Bearer my-secret-token"
-	if authHeaderReceived != expectedAuth {
-		t.Errorf("expected Authorization: %s, got: %s", expectedAuth, authHeaderReceived)
+	expectedDeviceID := "test-device-key"
+	if deviceIDReceived != expectedDeviceID {
+		t.Errorf("expected X-Device-Id: %s, got: %s", expectedDeviceID, deviceIDReceived)
 	}
 }
 
@@ -1797,12 +1794,10 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 	oldMediaDir := MediaDir
 	oldMaxParallel := MaxParallelDownloads
 	oldBase := CoreAPIBase
-	oldToken := DeviceAuthToken
 	defer func() {
 		MediaDir = oldMediaDir
 		MaxParallelDownloads = oldMaxParallel
 		CoreAPIBase = oldBase
-		DeviceAuthToken = oldToken
 	}()
 
 	tmpDir := t.TempDir()
@@ -1849,7 +1844,6 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 	defer server.Close()
 
 	CoreAPIBase = server.URL
-	DeviceAuthToken = "test-token"
 
 	ctx := context.Background()
 	err := TriggerSync(ctx)
