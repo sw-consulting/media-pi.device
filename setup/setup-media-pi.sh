@@ -43,8 +43,13 @@ if [[ -n "${CORE_API_BASE}" ]]; then
     # Replace existing value
     sed -i "s|^core_api_base:.*|core_api_base: \"${CORE_API_BASE}\"|" "${AGENT_CONFIG_PATH}"
   else
-    # Add new line after media_pi_service_user (to maintain logical grouping)
-    sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "${AGENT_CONFIG_PATH}"
+    # Add new line - try after media_pi_service_user, otherwise append to end
+    if grep -q '^media_pi_service_user:' "${AGENT_CONFIG_PATH}"; then
+      sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "${AGENT_CONFIG_PATH}"
+    else
+      # Fallback: append to end of file if anchor not found
+      echo "core_api_base: \"${CORE_API_BASE}\"" >> "${AGENT_CONFIG_PATH}"
+    fi
   fi
 fi
 
