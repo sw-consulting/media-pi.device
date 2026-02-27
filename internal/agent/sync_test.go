@@ -130,8 +130,8 @@ func TestCalculateNextSyncTime_EmptySchedule(t *testing.T) {
 
 func TestFetchManifest(t *testing.T) {
 	manifest := []ManifestItem{
-		{ID: "1", Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
-		{ID: "2", Filename: "video2.mp4", FileSizeBytes: 2048, SHA256: "def456"},
+		{ID: 1, Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
+		{ID: 2, Filename: "video2.mp4", FileSizeBytes: 2048, SHA256: "def456"},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,14 +190,14 @@ func TestDownloadFile(t *testing.T) {
 	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: int64(len(content)),
 		SHA256:        expectedHash,
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPath := "/api/devicesync/" + item.ID
+		expectedPath := fmt.Sprintf("/api/devicesync/%d", item.ID)
 		if r.URL.Path != expectedPath {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -248,7 +248,7 @@ func TestDownloadFile_SizeMismatch(t *testing.T) {
 	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: 999, // Wrong size
 		SHA256:        expectedHash,
@@ -282,7 +282,7 @@ func TestDownloadFile_HashMismatch(t *testing.T) {
 	content := []byte("test content")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: int64(len(content)),
 		SHA256:        "wronghash123",
@@ -506,13 +506,13 @@ func TestTriggerSyncSuccess(t *testing.T) {
 
 	manifest := []ManifestItem{
 		{
-			ID:            "id1",
+			ID:            1,
 			Filename:      "video1.mp4",
 			FileSizeBytes: int64(len(content1)),
 			SHA256:        hash1,
 		},
 		{
-			ID:            "id2",
+			ID:            2,
 			Filename:      "video2.mp4",
 			FileSizeBytes: int64(len(content2)),
 			SHA256:        hash2,
@@ -532,11 +532,11 @@ func TestTriggerSyncSuccess(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/api/devicesync/") {
 			id := strings.TrimPrefix(r.URL.Path, "/api/devicesync/")
 			switch id {
-			case "id1":
+			case "1":
 				if _, err := w.Write(content1); err != nil {
 					t.Errorf("failed to write response: %v", err)
 				}
-			case "id2":
+			case "2":
 				if _, err := w.Write(content2); err != nil {
 					t.Errorf("failed to write response: %v", err)
 				}
@@ -660,7 +660,7 @@ func TestTriggerSyncSkipsExistingFiles(t *testing.T) {
 
 	manifest := []ManifestItem{
 		{
-			ID:            "id1",
+			ID:            1,
 			Filename:      "video1.mp4",
 			FileSizeBytes: int64(len(content)),
 			SHA256:        hash,
@@ -750,7 +750,7 @@ func TestTriggerSyncDownloadError(t *testing.T) {
 
 	manifest := []ManifestItem{
 		{
-			ID:            "id1",
+			ID:            1,
 			Filename:      "video1.mp4",
 			FileSizeBytes: int64(len(content)),
 			SHA256:        hash,
@@ -925,7 +925,7 @@ func TestDownloadFile_HTTPError(t *testing.T) {
 	destPath := filepath.Join(tempDir, "test.mp4")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: 100,
 		SHA256:        "abc123",
@@ -1007,7 +1007,7 @@ func TestDownloadFile_NoAPIBase(t *testing.T) {
 	destPath := filepath.Join(tempDir, "test.mp4")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: 100,
 		SHA256:        "abc123",
@@ -1022,7 +1022,7 @@ func TestDownloadFile_NoAPIBase(t *testing.T) {
 
 func TestFetchManifest_WithAuth(t *testing.T) {
 	manifest := []ManifestItem{
-		{ID: "1", Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
+		{ID: 1, Filename: "video1.mp4", FileSizeBytes: 1024, SHA256: "abc123"},
 	}
 
 	deviceIDReceived := ""
@@ -1090,7 +1090,7 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 	destPath := filepath.Join(tempDir, "test.mp4")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: int64(len(content)),
 		SHA256:        expectedHash,
@@ -1223,7 +1223,7 @@ func TestDownloadFile_WriteFails(t *testing.T) {
 	destPath := filepath.Join(tempDir, "test.mp4")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: 1000000,
 		SHA256:        expectedHash,
@@ -1336,7 +1336,7 @@ func TestDownloadFile_ContextCanceled(t *testing.T) {
 	destPath := filepath.Join(tempDir, "test.mp4")
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: 100,
 		SHA256:        "abc123",
@@ -1377,7 +1377,7 @@ func TestSyncFilesParallelDownloads(t *testing.T) {
 		files[filename] = content
 
 		manifest = append(manifest, ManifestItem{
-			ID:            fmt.Sprintf("id%d", i),
+			ID:            int64(i),
 			Filename:      filename,
 			FileSizeBytes: int64(len(content)),
 			SHA256:        hash,
@@ -1510,7 +1510,7 @@ func TestDownloadFile_CreateTempError(t *testing.T) {
 	destPath := "/proc/test.mp4"
 
 	item := ManifestItem{
-		ID:            "test-id",
+		ID:            123,
 		Filename:      "test.mp4",
 		FileSizeBytes: int64(len(content)),
 		SHA256:        expectedHash,
@@ -1810,25 +1810,25 @@ func TestSyncFiles_InvalidFilenames(t *testing.T) {
 		case "/api/devicesync":
 			manifest := []ManifestItem{
 				{
-					ID:            "1",
+					ID:            1,
 					Filename:      "valid.mp4",
 					FileSizeBytes: 4,
 					SHA256:        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", // sha256("test")
 				},
 				{
-					ID:            "2",
+					ID:            2,
 					Filename:      "../../../etc/passwd",
 					FileSizeBytes: 100,
 					SHA256:        "invalid",
 				},
 				{
-					ID:            "3",
+					ID:            3,
 					Filename:      "/absolute/path",
 					FileSizeBytes: 100,
 					SHA256:        "invalid",
 				},
 				{
-					ID:            "4",
+					ID:            4,
 					Filename:      "subdir/file.mp4",
 					FileSizeBytes: 100,
 					SHA256:        "invalid",
