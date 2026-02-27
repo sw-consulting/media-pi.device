@@ -67,6 +67,11 @@ install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bi
 # systemd service file --> /etc/systemd/system
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
+# Create default sync.schedule.json file
+mkdir -p "${ROOT}/etc/systemd/system"
+echo '{"times":[]}' > "${ROOT}/etc/systemd/system/sync.schedule.json"
+chmod 0644 "${ROOT}/etc/systemd/system/sync.schedule.json"
+
 # Генерация правила polkit на этапе сборки.
 
 # Собираем массив уникальных имён единиц из agent.yaml
@@ -173,6 +178,35 @@ id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
 # Reload systemd daemon to pick up new/updated service file
 systemctl daemon-reload || true
+
+# On upgrade, disable old playlist/video upload units if they exist
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    # Disable old units (best effort, don't fail if they don't exist)
+    for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            echo "Disabling old unit: $unit"
+            systemctl disable "$unit" || true
+        fi
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            echo "Stopping old unit: $unit"
+            systemctl stop "$unit" || true
+        fi
+    done
+    systemctl daemon-reload || true
+fi
+
+# Check if media directory exists and warn if not
+MEDIA_DIR="/mnt/media-pi"
+if [ ! -d "$MEDIA_DIR" ]; then
+    echo "Warning: Media directory $MEDIA_DIR does not exist."
+    echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."
+fi
+
+# Ensure sync.schedule.json exists with valid JSON
+if [ ! -f /etc/systemd/system/sync.schedule.json ]; then
+    echo '{"times":[]}' > /etc/systemd/system/sync.schedule.json
+    chmod 0644 /etc/systemd/system/sync.schedule.json
+fi
 
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then
