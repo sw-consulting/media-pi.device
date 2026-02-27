@@ -10,6 +10,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +28,7 @@ const (
 	serverReadTimeout  = 15 * time.Second
 	serverWriteTimeout = 15 * time.Second
 	serverIdleTimeout  = 60 * time.Second
+	shutdownTimeout    = 10 * time.Second
 )
 
 func main() {
@@ -89,6 +92,22 @@ func main() {
 	}
 	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
 
+	// Create a context for the sync scheduler
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the sync scheduler
+	log.Println("Starting sync scheduler...")
+	agent.StartSyncScheduler(ctx)
+
+	// Set callback for scheduled syncs to restart video.play service.
+	// Scheduled syncs may include playlist changes that affect playback.
+	agent.SetScheduledSyncCallback(func() {
+		if err := agent.RestartVideoPlayService(); err != nil {
+			log.Printf("Warning: failed to restart video.play service after scheduled sync: %v", err)
+		}
+	})
+
 	server := &http.Server{
 		Addr:         listenAddr,
 		Handler:      mux,
@@ -99,18 +118,38 @@ func main() {
 
 	// Handle SIGHUP to reload configuration without restarting the process.
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		for range sigs {
-			log.Printf("received SIGHUP, reloading configuration")
-			if err := agent.ReloadConfig(); err != nil {
-				log.Printf("reload failed: %v", err)
-			} else {
-				log.Printf("configuration reloaded")
+		for sig := range sigs {
+			switch sig {
+			case syscall.SIGHUP:
+				log.Printf("received SIGHUP, reloading configuration")
+				if err := agent.ReloadConfig(); err != nil {
+					log.Printf("reload failed: %v", err)
+				} else {
+					log.Printf("configuration reloaded")
+				}
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Printf("received %v, shutting down", sig)
+				// Cancel context to stop sync scheduler
+				cancel()
+				// Wait for sync scheduler to stop
+				log.Printf("Stopping sync scheduler...")
+				agent.StopSyncScheduler()
+				log.Printf("Sync scheduler stopped")
+				// Gracefully shutdown HTTP server with timeout
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+				if err := server.Shutdown(shutdownCtx); err != nil {
+					log.Printf("Error during server shutdown: %v", err)
+				} else {
+					log.Printf("Server shutdown complete")
+				}
+				shutdownCancel()
+				os.Exit(0)
 			}
 		}
 	}()
-	if err := server.ListenAndServe(); err != nil {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

@@ -29,10 +29,14 @@ import (
 // from YAML and contains the list of allowed systemd units, the server
 // authentication key and the listen address for the HTTP API.
 type Config struct {
-	AllowedUnits       []string `yaml:"allowed_units"`
-	ServerKey          string   `yaml:"server_key,omitempty"`
-	ListenAddr         string   `yaml:"listen_addr,omitempty"`
-	MediaPiServiceUser string   `yaml:"media_pi_service_user,omitempty"`
+	AllowedUnits         []string `yaml:"allowed_units"`
+	ServerKey            string   `yaml:"server_key,omitempty"`
+	ListenAddr           string   `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser   string   `yaml:"media_pi_service_user,omitempty"`
+	CoreAPIBase          string   `yaml:"core_api_base,omitempty"`
+	DeviceAuthToken      string   `yaml:"device_auth_token,omitempty"`
+	MediaDir             string   `yaml:"media_dir,omitempty"`
+	MaxParallelDownloads int      `yaml:"max_parallel_downloads,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -82,6 +86,18 @@ var (
 	// MediaPiServiceUser is the username for crontab and systemd timer operations.
 	// It defaults to "pi" and is loaded from the configuration.
 	MediaPiServiceUser string
+
+	// CoreAPIBase is the base URL of the media-pi.core backend API.
+	CoreAPIBase string
+
+	// DeviceAuthToken is the authentication token for the device.
+	DeviceAuthToken string
+
+	// MediaDir is the directory where media files are stored.
+	MediaDir string
+
+	// MaxParallelDownloads limits the number of concurrent file downloads.
+	MaxParallelDownloads int
 )
 
 // DefaultListenAddr is used when the configuration does not specify a
@@ -113,9 +129,11 @@ func GetVersion() string {
 // DefaultConfig returns a reasonable default Config.
 func DefaultConfig() Config {
 	return Config{
-		AllowedUnits:       []string{},
-		ListenAddr:         DefaultListenAddr,
-		MediaPiServiceUser: "pi",
+		AllowedUnits:         []string{},
+		ListenAddr:           DefaultListenAddr,
+		MediaPiServiceUser:   "pi",
+		MediaDir:             "/var/lib/media-pi",
+		MaxParallelDownloads: 3,
 	}
 }
 
@@ -146,9 +164,23 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MediaPiServiceUser = "pi"
 	}
 
+	// Set default media directory if not specified
+	if c.MediaDir == "" {
+		c.MediaDir = "/var/lib/media-pi"
+	}
+
+	// Set default max parallel downloads if not specified
+	if c.MaxParallelDownloads <= 0 {
+		c.MaxParallelDownloads = 3
+	}
+
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
+	CoreAPIBase = c.CoreAPIBase
+	DeviceAuthToken = c.DeviceAuthToken
+	MediaDir = c.MediaDir
+	MaxParallelDownloads = c.MaxParallelDownloads
 
 	return &c, nil
 }

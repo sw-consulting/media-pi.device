@@ -229,11 +229,13 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	if resp.Data.PlaybackServiceStatus != true {
 		t.Fatalf("expected playback service to be active, got %v", resp.Data.PlaybackServiceStatus)
 	}
+	// PlaylistUploadServiceStatus and VideoUploadServiceStatus now report in-progress sync status
+	// Since no sync is running in this test, both should be false
 	if resp.Data.PlaylistUploadServiceStatus != false {
-		t.Fatalf("expected playlist upload service to be inactive, got %v", resp.Data.PlaylistUploadServiceStatus)
+		t.Fatalf("expected playlist upload service (sync in progress) to be false, got %v", resp.Data.PlaylistUploadServiceStatus)
 	}
-	if resp.Data.VideoUploadServiceStatus != true {
-		t.Fatalf("expected video upload service to be active, got %v", resp.Data.VideoUploadServiceStatus)
+	if resp.Data.VideoUploadServiceStatus != false {
+		t.Fatalf("expected video upload service (sync in progress) to be false, got %v", resp.Data.VideoUploadServiceStatus)
 	}
 
 	// Ensure the mount detection reads our temp mounts file
