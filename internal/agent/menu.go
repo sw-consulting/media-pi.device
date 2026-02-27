@@ -916,7 +916,7 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 	ctx := GetMainAppContext()
 
 	// Trigger an immediate sync without restarting video.play service.
-	// Video syncs only update video files and should not interrupt playback.
+	// Video syncs update all files from the manifest but do not interrupt playback.
 	go func() {
 		if err := TriggerSync(ctx); err != nil {
 			log.Printf("Manual video sync error: %v", err)
