@@ -241,7 +241,10 @@ func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audi
 	return saveConfigToFile(ConfigPath, currentConfig)
 }
 
-// saveConfigToFile writes the configuration to a YAML file.
+// saveConfigToFile writes the configuration to a YAML file using an atomic write pattern.
+// It first writes to a temporary file, then renames it to the target path to prevent
+// partial writes or corruption if the process is interrupted. This ensures the config
+// file is always in a consistent state.
 // This function is NOT thread-safe and should be called with configMutex held or from LoadConfigFrom.
 func saveConfigToFile(path string, c *Config) error {
 	data, err := yaml.Marshal(c)

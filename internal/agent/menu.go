@@ -690,18 +690,21 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update configuration file with all settings
+	// Note: We log but don't fail on config file update errors during migration period.
+	// Systemd files remain the operational source of truth, and YAML file is being
+	// introduced as the new configuration store. On next agent restart, the YAML will
+	// be populated via migration if still missing.
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
 		restConfigPairs[i] = RestTimePairConfig(p)
 	}
-
+	
 	if err := UpdateConfigSettings(
 		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
 	); err != nil {
 		log.Printf("Warning: Failed to update config file: %v", err)
-		// Don't fail the request if config file update fails, as systemd files are updated
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-update", Result: "success", Message: "Конфигурация обновлена"}})
@@ -1059,7 +1062,10 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update configuration file with schedule settings
-	// Get current config to preserve other settings
+	// Note: We log but don't fail on config file update errors during migration period.
+	// Systemd files remain the operational source of truth, and YAML file is being
+	// introduced as the new configuration store. On next agent restart, the YAML will
+	// be populated via migration if still missing.
 	cfg := GetCurrentConfig()
 	
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
@@ -1073,7 +1079,6 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		cfg.Audio, // Keep existing audio config
 	); err != nil {
 		log.Printf("Warning: Failed to update config file: %v", err)
-		// Don't fail the request if config file update fails, as systemd files are updated
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
