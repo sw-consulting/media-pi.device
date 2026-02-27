@@ -1971,3 +1971,61 @@ func TestScheduleReloadImmediate(t *testing.T) {
 	}
 }
 
+// TestSyncFilesGarbageCollectsInvalidFilenames tests that files with invalid
+// names from the manifest don't prevent garbage collection.
+func TestSyncFilesGarbageCollectsInvalidFilenames(t *testing.T) {
+	tempDir := t.TempDir()
+	mediaDir := filepath.Join(tempDir, "media")
+	oldMediaDir := MediaDir
+	MediaDir = mediaDir
+	defer func() { MediaDir = oldMediaDir }()
+
+	// Create media dir with a file that has an invalid name (will be in manifest)
+	if err := os.MkdirAll(mediaDir, 0755); err != nil {
+		t.Fatalf("failed to create media dir: %v", err)
+	}
+
+	// Create a file with a path traversal name that should be garbage collected
+	invalidFile := filepath.Join(mediaDir, "..%2Fetc%2Fpasswd")
+	if err := os.WriteFile(invalidFile, []byte("malicious content"), 0644); err != nil {
+		t.Fatalf("failed to write invalid file: %v", err)
+	}
+
+	// Manifest contains an item with invalid filename (path traversal attempt)
+	manifest := []ManifestItem{
+		{
+			Filename:      "../etc/passwd",
+			FileSizeBytes: 17,
+			SHA256:        "0000000000000000000000000000000000000000000000000000000000000000",
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/devicesync" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(manifest); err != nil {
+				t.Errorf("failed to encode manifest: %v", err)
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	oldBase := CoreAPIBase
+	CoreAPIBase = server.URL
+	defer func() { CoreAPIBase = oldBase }()
+
+	ctx := context.Background()
+	// syncFiles should succeed (skipping the invalid file)
+	if err := syncFiles(ctx); err != nil {
+		t.Fatalf("syncFiles failed: %v", err)
+	}
+
+	// Verify the file with invalid name was garbage collected
+	// (because it wasn't added to expectedFiles after validation)
+	if _, err := os.Stat(invalidFile); !os.IsNotExist(err) {
+		t.Error("file with invalid name should have been garbage collected")
+	}
+}
+
