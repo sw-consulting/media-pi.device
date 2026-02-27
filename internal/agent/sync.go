@@ -90,14 +90,17 @@ func SetSyncSchedule(times []string) error {
 
 	// Signal the scheduler to reload the schedule immediately
 	syncReloadChanLock.Lock()
-	if syncReloadChan != nil {
+	ch := syncReloadChan
+	syncReloadChanLock.Unlock()
+	
+	if ch != nil {
 		select {
-		case syncReloadChan <- struct{}{}:
+		case ch <- struct{}{}:
+			// Successfully sent reload signal
 		default:
-			// Channel is full or scheduler is not listening, ignore
+			// Channel is full or not being read, ignore
 		}
 	}
-	syncReloadChanLock.Unlock()
 
 	return nil
 }
@@ -644,7 +647,10 @@ func StopSyncScheduler() {
 				// Now it's safe to reset for next start
 				syncStopOnce = sync.Once{}
 				syncReloadChanLock.Lock()
-				syncReloadChan = nil
+				if syncReloadChan != nil {
+					close(syncReloadChan)
+					syncReloadChan = nil
+				}
 				syncReloadChanLock.Unlock()
 				break
 			}
