@@ -288,79 +288,38 @@ func TestHandleConfigurationUpdateMethodNotAllowed(t *testing.T) {
 func TestHandleConfigurationGet(t *testing.T) {
 	ServerKey = "test-key"
 
-	tmp := t.TempDir()
-	servicePath := filepath.Join(tmp, "playlist.upload.service")
-	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
-	videoTimer := filepath.Join(tmp, "video.upload.timer")
-	audioPath := filepath.Join(tmp, "asound.conf")
+	// Set up test config in memory
+	testConfig := &Config{
+		AllowedUnits:       []string{},
+		ServerKey:          "test-key",
+		ListenAddr:         "0.0.0.0:8081",
+		MediaPiServiceUser: "pi",
+		Playlist: PlaylistConfig{
+			Source:      "/mnt/src/playlist/",
+			Destination: "/mnt/dst/playlist/",
+		},
+		Schedule: ScheduleConfig{
+			Playlist: []string{"12:32", "16:28"},
+			Video:    []string{"22:22"},
+			Rest: []RestTimePairConfig{
+				{Start: "18:30", Stop: "09:00"},
+			},
+		},
+		Audio: AudioConfig{
+			Output: "hdmi",
+		},
+	}
 
-	originalServicePath := PlaylistServicePath
-	originalPlaylist := PlaylistTimerPath
-	originalVideo := VideoTimerPath
-	originalAudio := AudioConfigPath
-	PlaylistServicePath = servicePath
-	PlaylistTimerPath = playlistTimer
-	VideoTimerPath = videoTimer
-	AudioConfigPath = audioPath
+	// Save and restore original config
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = testConfig
+	configMutex.Unlock()
 	t.Cleanup(func() {
-		PlaylistServicePath = originalServicePath
-		PlaylistTimerPath = originalPlaylist
-		VideoTimerPath = originalVideo
-		AudioConfigPath = originalAudio
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
 	})
-
-	serviceContent := `[Unit]
-Description = Rsync playlist upload service
-[Service]
-ExecStart = /usr/bin/rsync -czavP /mnt/src/playlist/ /mnt/dst/playlist/ # nightly sync
-[Install]
-WantedBy = multi-user.target
-`
-	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
-		t.Fatalf("failed to write service file: %v", err)
-	}
-
-	playlistContent := `[Unit]
-Description = Playlist upload timer
-
-[Timer]
-OnCalendar=*-*-* 12:32:00
-OnCalendar=*-*-* 16:28:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(playlistTimer, []byte(playlistContent), 0644); err != nil {
-		t.Fatalf("failed to write playlist timer: %v", err)
-	}
-
-	videoContent := `[Unit]
-Description = Video upload timer
-
-[Timer]
-OnCalendar=*-*-* 22:22:00
-
-[Install]
-WantedBy=timers.target
-`
-	if err := os.WriteFile(videoTimer, []byte(videoContent), 0644); err != nil {
-		t.Fatalf("failed to write video timer: %v", err)
-	}
-
-	if err := os.WriteFile(audioPath, []byte("defaults.pcm.card 0\n"), 0644); err != nil {
-		t.Fatalf("failed to write audio config: %v", err)
-	}
-
-	originalCrontabRead := CrontabReadFunc
-	CrontabReadFunc = func() (string, error) {
-		return strings.Join([]string{
-			"# MEDIA_PI_REST STOP",
-			"30 18 * * * sudo systemctl stop play.video.service",
-			"# MEDIA_PI_REST START",
-			"00 09 * * * sudo systemctl start play.video.service",
-		}, "\n") + "\n", nil
-	}
-	t.Cleanup(func() { CrontabReadFunc = originalCrontabRead })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/configuration/get", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
