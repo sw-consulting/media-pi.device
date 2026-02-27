@@ -22,8 +22,7 @@ import (
 )
 
 var (
-	syncScheduleFilePath = "/etc/systemd/system/sync.schedule.json"
-	syncStatusFilePath   = "/var/lib/media-pi-agent/sync-status.json"
+	syncStatusFilePath = "/var/lib/media-pi-agent/sync-status.json"
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -46,19 +45,10 @@ type SyncStatus struct {
 	Error        string    `json:"error,omitempty"`
 }
 
-// SyncSchedule represents the schedule configuration for sync operations.
-type SyncSchedule struct {
-	Times []string `json:"times"`
-}
-
 var (
 	// syncStatus holds the last sync status in memory
 	syncStatus     SyncStatus
 	syncStatusLock sync.RWMutex
-
-	// syncSchedule holds the current sync schedule
-	syncSchedule     SyncSchedule
-	syncScheduleLock sync.RWMutex
 
 	// syncContext and syncCancel are used to cancel ongoing sync operations
 	syncContext context.Context
@@ -79,79 +69,6 @@ var (
 func init() {
 	syncContext, syncCancel = context.WithCancel(context.Background())
 	syncReloadChan = make(chan struct{}, 1)
-}
-
-// SetSyncSchedule updates the sync schedule and persists it to file.
-func SetSyncSchedule(times []string) error {
-	schedule := SyncSchedule{Times: times}
-	data, err := json.Marshal(schedule)
-	if err != nil {
-		return fmt.Errorf("failed to marshal sync schedule: %w", err)
-	}
-
-	// Ensure directory exists
-	dir := filepath.Dir(syncScheduleFilePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Write atomically
-	tmpPath := syncScheduleFilePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temp schedule file: %w", err)
-	}
-	if err := os.Rename(tmpPath, syncScheduleFilePath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename schedule file: %w", err)
-	}
-
-	// Update in-memory schedule
-	syncScheduleLock.Lock()
-	syncSchedule = schedule
-	syncScheduleLock.Unlock()
-
-	// Signal scheduler to reload - use defer to ensure unlock before channel send
-	syncLock.Lock()
-	defer syncLock.Unlock()
-	select {
-	case syncReloadChan <- struct{}{}:
-	default:
-	}
-
-	return nil
-}
-
-// GetSyncSchedule returns the current sync schedule.
-func GetSyncSchedule() SyncSchedule {
-	syncScheduleLock.RLock()
-	defer syncScheduleLock.RUnlock()
-	return syncSchedule
-}
-
-// LoadSyncSchedule loads the sync schedule from file.
-func LoadSyncSchedule() error {
-	data, err := os.ReadFile(syncScheduleFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist, use empty schedule
-			syncScheduleLock.Lock()
-			syncSchedule = SyncSchedule{Times: []string{}}
-			syncScheduleLock.Unlock()
-			return nil
-		}
-		return fmt.Errorf("failed to read sync schedule: %w", err)
-	}
-
-	var schedule SyncSchedule
-	if err := json.Unmarshal(data, &schedule); err != nil {
-		return fmt.Errorf("failed to parse sync schedule: %w", err)
-	}
-
-	syncScheduleLock.Lock()
-	syncSchedule = schedule
-	syncScheduleLock.Unlock()
-
-	return nil
 }
 
 // GetSyncStatus returns the current sync status.
@@ -526,6 +443,33 @@ func TriggerSyncWithCallback(callback func()) error {
 	return TriggerSync(callback)
 }
 
+// TriggerPlaylistSync triggers playlist download and service restart.
+// This downloads only the playlist file (not video files) and restarts the play service.
+func TriggerPlaylistSync(callback func()) error {
+	syncLock.Lock()
+	defer syncLock.Unlock()
+
+	// Cancel any ongoing sync
+	if syncCancel != nil {
+		syncCancel()
+	}
+
+	// Create new context
+	syncContext, syncCancel = context.WithCancel(context.Background())
+
+	// Perform playlist sync in background
+	go func() {
+		log.Println("Starting playlist-only sync")
+		if err := PerformPlaylistSync(syncContext); err != nil {
+			log.Printf("Playlist sync error: %v", err)
+		} else if callback != nil {
+			callback()
+		}
+	}()
+
+	return nil
+}
+
 // StopSync cancels any ongoing sync operation.
 func StopSync() error {
 	syncLock.Lock()
@@ -613,12 +557,9 @@ func PerformPlaylistSync(ctx context.Context) error {
 	return nil
 }
 
-// StartScheduler starts the sync scheduler with the given schedule.
+// StartScheduler starts the sync scheduler.
+// Schedule is read from config (agent.yaml) - no separate schedule file needed.
 func StartScheduler() error {
-	if err := LoadSyncSchedule(); err != nil {
-		log.Printf("Warning: Failed to load sync schedule: %v", err)
-	}
-
 	// Initialize cron scheduler
 	cronScheduler = cron.New()
 
@@ -629,9 +570,12 @@ func StartScheduler() error {
 }
 
 // schedulerLoop manages scheduled sync operations.
+// It reads playlist and video schedules from config and schedules them separately:
+// - Playlist schedule: downloads playlist only and restarts play service
+// - Video schedule: downloads video files only (no playlist, no restart)
 func schedulerLoop() {
 	for {
-		schedule := GetSyncSchedule()
+		config := GetCurrentConfig()
 
 		// Stop existing scheduler
 		if cronScheduler != nil {
@@ -639,23 +583,21 @@ func schedulerLoop() {
 			cronScheduler = cron.New()
 		}
 
-		// Add scheduled tasks
-		for _, timeStr := range schedule.Times {
-			// Parse time format (HH:MM) and convert to cron format (MM HH)
+		// Add scheduled playlist sync tasks (playlist only + restart service)
+		for _, timeStr := range config.Schedule.Playlist {
 			timeStr := timeStr // capture loop variable
 			parts := strings.Split(timeStr, ":")
 			if len(parts) != 2 {
-				log.Printf("Warning: Invalid time format '%s', expected HH:MM", timeStr)
+				log.Printf("Warning: Invalid playlist time format '%s', expected HH:MM", timeStr)
 				continue
 			}
-			// Convert HH:MM to MM HH for cron
 			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
-				log.Printf("Running scheduled sync at %s", timeStr)
-				if err := PerformSync(context.Background()); err != nil {
-					log.Printf("Scheduled sync error: %v", err)
+				log.Printf("Running scheduled playlist sync at %s", timeStr)
+				if err := PerformPlaylistSync(context.Background()); err != nil {
+					log.Printf("Scheduled playlist sync error: %v", err)
 				} else {
-					// Call the scheduled sync callback if set
+					// Restart play service after successful playlist sync
 					callback := getScheduledSyncCallback()
 					if callback != nil {
 						callback()
@@ -663,7 +605,28 @@ func schedulerLoop() {
 				}
 			})
 			if err != nil {
-				log.Printf("Warning: Failed to schedule sync at %s: %v", timeStr, err)
+				log.Printf("Warning: Failed to schedule playlist sync at %s: %v", timeStr, err)
+			}
+		}
+
+		// Add scheduled video sync tasks (video files only, no restart)
+		for _, timeStr := range config.Schedule.Video {
+			timeStr := timeStr // capture loop variable
+			parts := strings.Split(timeStr, ":")
+			if len(parts) != 2 {
+				log.Printf("Warning: Invalid video time format '%s', expected HH:MM", timeStr)
+				continue
+			}
+			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
+			_, err := cronScheduler.AddFunc(cronSpec, func() {
+				log.Printf("Running scheduled video sync at %s", timeStr)
+				if err := PerformSync(context.Background()); err != nil {
+					log.Printf("Scheduled video sync error: %v", err)
+				}
+				// Note: No restart after video sync - only playlist sync restarts service
+			})
+			if err != nil {
+				log.Printf("Warning: Failed to schedule video sync at %s: %v", timeStr, err)
 			}
 		}
 
@@ -694,5 +657,15 @@ func getScheduledSyncCallback() func() {
 func StopScheduler() {
 	if cronScheduler != nil {
 		cronScheduler.Stop()
+	}
+}
+
+// SignalSchedulerReload signals the scheduler to reload its configuration.
+func SignalSchedulerReload() {
+	syncLock.Lock()
+	defer syncLock.Unlock()
+	select {
+	case syncReloadChan <- struct{}{}:
+	default:
 	}
 }

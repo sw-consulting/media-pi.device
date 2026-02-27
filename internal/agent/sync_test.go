@@ -547,67 +547,6 @@ func TestSyncFiles_WithSubdirectories(t *testing.T) {
 	_ = err // Ignore errors from hash mismatches
 }
 
-func TestSetSyncSchedule(t *testing.T) {
-	tmpDir := t.TempDir()
-	oldPath := syncScheduleFilePath
-	syncScheduleFilePath = filepath.Join(tmpDir, "sync.schedule.json")
-	defer func() { syncScheduleFilePath = oldPath }()
-
-	times := []string{"10:30", "14:45"}
-	err := SetSyncSchedule(times)
-	if err != nil {
-		t.Errorf("SetSyncSchedule() error = %v", err)
-	}
-
-	// Verify file was created
-	data, err := os.ReadFile(syncScheduleFilePath)
-	if err != nil {
-		t.Errorf("failed to read schedule file: %v", err)
-	}
-
-	var schedule SyncSchedule
-	if err := json.Unmarshal(data, &schedule); err != nil {
-		t.Errorf("failed to parse schedule: %v", err)
-	}
-
-	if len(schedule.Times) != 2 {
-		t.Errorf("expected 2 times, got %d", len(schedule.Times))
-	}
-}
-
-func TestLoadSyncSchedule(t *testing.T) {
-	tmpDir := t.TempDir()
-	oldPath := syncScheduleFilePath
-	syncScheduleFilePath = filepath.Join(tmpDir, "sync.schedule.json")
-	defer func() { syncScheduleFilePath = oldPath }()
-
-	// Test with missing file
-	err := LoadSyncSchedule()
-	if err != nil {
-		t.Errorf("LoadSyncSchedule() should not error on missing file, got: %v", err)
-	}
-
-	schedule := GetSyncSchedule()
-	if len(schedule.Times) != 0 {
-		t.Errorf("expected empty schedule, got %d times", len(schedule.Times))
-	}
-
-	// Test with valid file
-	testSchedule := SyncSchedule{Times: []string{"10:30", "14:45"}}
-	data, _ := json.Marshal(testSchedule)
-	_ = os.WriteFile(syncScheduleFilePath, data, 0644)
-
-	err = LoadSyncSchedule()
-	if err != nil {
-		t.Errorf("LoadSyncSchedule() error = %v", err)
-	}
-
-	schedule = GetSyncSchedule()
-	if len(schedule.Times) != 2 {
-		t.Errorf("expected 2 times, got %d", len(schedule.Times))
-	}
-}
-
 func TestGetSetSyncStatus(t *testing.T) {
 	status := SyncStatus{
 		LastSyncTime: time.Now(),

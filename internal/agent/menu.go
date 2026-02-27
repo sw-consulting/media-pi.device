@@ -849,6 +849,7 @@ type ScheduleUpdateRequest struct {
 }
 
 // HandlePlaylistStartUpload triggers playlist sync (replaces old systemd upload service).
+// This downloads only the playlist file (not video files) and restarts the play service.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
@@ -858,16 +859,11 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger both file sync and playlist download with callback to restart video.play service
-	err := TriggerSync(func() {
-		log.Println("File sync completed, downloading playlist")
-		// Download the playlist file
-		if err := PerformPlaylistSync(context.Background()); err != nil {
-			log.Printf("Warning: Failed to download playlist: %v", err)
-		}
-		log.Println("Playlist sync completed, restarting video.play service")
+	// Trigger playlist-only sync with callback to restart play.video.service
+	err := TriggerPlaylistSync(func() {
+		log.Println("Playlist sync completed, restarting play.video.service")
 		if err := restartVideoPlayService(); err != nil {
-			log.Printf("Warning: Failed to restart video.play service: %v", err)
+			log.Printf("Warning: Failed to restart play.video.service: %v", err)
 		}
 	})
 

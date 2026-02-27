@@ -241,7 +241,7 @@ func GetCurrentConfig() Config {
 }
 
 // UpdateConfigSettings updates the configuration settings in memory and saves to file.
-// This function is thread-safe.
+// This function is thread-safe. After saving, it signals the scheduler to reload.
 func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audio AudioConfig) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
@@ -260,7 +260,14 @@ func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audi
 		return fmt.Errorf("config path is not set")
 	}
 
-	return saveConfigToFile(ConfigPath, currentConfig)
+	if err := saveConfigToFile(ConfigPath, currentConfig); err != nil {
+		return err
+	}
+
+	// Signal scheduler to reload with new schedule
+	SignalSchedulerReload()
+
+	return nil
 }
 
 // saveConfigToFile writes the configuration to a YAML file using an atomic write pattern.

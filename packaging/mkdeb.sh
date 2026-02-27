@@ -67,11 +67,6 @@ install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bi
 # systemd service file --> /etc/systemd/system
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
-# Create default sync.schedule.json file
-mkdir -p "${ROOT}/etc/systemd/system"
-echo '{"times":[]}' > "${ROOT}/etc/systemd/system/sync.schedule.json"
-chmod 0644 "${ROOT}/etc/systemd/system/sync.schedule.json"
-
 # Генерация правила polkit на этапе сборки.
 
 # Собираем массив уникальных имён единиц из agent.yaml
@@ -200,12 +195,6 @@ MEDIA_DIR="/var/media-pi"
 if [ ! -d "$MEDIA_DIR" ]; then
     echo "Warning: Media directory $MEDIA_DIR does not exist."
     echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."
-fi
-
-# Ensure sync.schedule.json exists with valid JSON
-if [ ! -f /etc/systemd/system/sync.schedule.json ]; then
-    echo '{"times":[]}' > /etc/systemd/system/sync.schedule.json
-    chmod 0644 /etc/systemd/system/sync.schedule.json
 fi
 
 # Handle service management based on install type
