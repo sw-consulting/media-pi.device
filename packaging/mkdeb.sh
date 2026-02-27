@@ -196,14 +196,17 @@ JSON
 fi
 
 # Disable and stop old playlist/video upload systemd units if they exist (for upgrades)
+OLD_UNITS_DISABLED=0
 for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
         echo "Stopping old unit: $unit"
         systemctl stop "$unit" || true
+        OLD_UNITS_DISABLED=1
     fi
     if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
         echo "Disabling old unit: $unit"
         systemctl disable "$unit" || true
+        OLD_UNITS_DISABLED=1
     fi
 done
 
@@ -233,8 +236,10 @@ if [ "$1" = "configure" ]; then
     else
         # Upgrade from previous version
         echo "Media Pi Agent upgraded successfully."
-        echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
-        echo "The agent now uses an internal sync scheduler instead."
+        if [ "$OLD_UNITS_DISABLED" -eq 1 ]; then
+            echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
+            echo "The agent now uses an internal sync scheduler instead."
+        fi
         
         # Update core_api_base in configuration if CORE_API_BASE environment variable is set
         # Only set if not already configured (never overwrite existing values)

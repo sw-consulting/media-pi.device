@@ -28,7 +28,7 @@ var (
 
 // ManifestItem represents a single file entry from the backend manifest.
 type ManifestItem struct {
-	ID            string `json:"id"`
+	ID            int64  `json:"id"`
 	Filename      string `json:"filename"`
 	FileSizeBytes int64  `json:"fileSizeBytes"`
 	SHA256        string `json:"sha256"`
@@ -204,7 +204,7 @@ func downloadFile(ctx context.Context, item ManifestItem, destPath string) error
 		return fmt.Errorf("core_api_base not configured")
 	}
 
-	url := fmt.Sprintf("%s/api/devicesync/%s", CoreAPIBase, item.ID)
+	url := fmt.Sprintf("%s/api/devicesync/%d", CoreAPIBase, item.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create download request: %w", err)
