@@ -227,4 +227,7 @@ server_key: "test-key-456"
 	if cfg.MaxParallelDownloads != 3 {
 		t.Errorf("expected MaxParallelDownloads default 3, got %d", cfg.MaxParallelDownloads)
 	}
+	if cfg.CoreAPIBase != "https://vezyn.fvds.ru" {
+		t.Errorf("expected CoreAPIBase default 'https://vezyn.fvds.ru', got %q", cfg.CoreAPIBase)
+	}
 }
