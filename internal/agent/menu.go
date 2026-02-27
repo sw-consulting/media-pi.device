@@ -891,52 +891,168 @@ func handleUploadServiceAction(
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: actionID, Result: result, Message: successMsg}})
 }
 
-// HandlePlaylistStartUpload starts the playlist.upload.service via D-Bus.
+// HandlePlaylistStartUpload triggers playlist sync (replaces old systemd upload service).
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-start-upload",
-		"Не удалось запустить загрузку плейлиста: %v",
-		"Таймаут запуска сервиса загрузки плейлиста",
-		"Загрузка плейлиста запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Требуется метод POST",
 		})
+		return
+	}
+
+	// Trigger playlist sync with callback to restart video.play service
+	err := TriggerSync(func() {
+		log.Println("Playlist sync completed, restarting video.play service")
+		if err := restartVideoPlayService(); err != nil {
+			log.Printf("Warning: Failed to restart video.play service: %v", err)
+		}
+	})
+
+	if err != nil {
+		log.Printf("Failed to trigger playlist sync: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось запустить загрузку плейлиста: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-start-upload",
+			Result:  "success",
+			Message: "Загрузка плейлиста запущена",
+		},
+	})
 }
 
-// HandlePlaylistStopUpload stops the playlist.upload.service via D-Bus.
+// HandlePlaylistStopUpload stops ongoing playlist sync (replaces old systemd upload service).
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "playlist.upload.service", "playlist-stop-upload",
-		"Не удалось остановить загрузку плейлиста: %v",
-		"Таймаут остановки сервиса загрузки плейлиста",
-		"Загрузка плейлиста остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Требуется метод POST",
 		})
+		return
+	}
+
+	err := StopSync()
+	if err != nil {
+		log.Printf("Failed to stop playlist sync: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось остановить загрузку плейлиста: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "playlist-stop-upload",
+			Result:  "success",
+			Message: "Загрузка плейлиста остановлена",
+		},
+	})
 }
 
-// HandleVideoStartUpload starts the video.upload.service via D-Bus.
+// HandleVideoStartUpload triggers video sync (replaces old systemd upload service).
 func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-start-upload",
-		"Не удалось запустить загрузку видео: %v",
-		"Таймаут запуска сервиса загрузки видео",
-		"Загрузка видео запущена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StartUnitContext(ctx, unit, "replace", ch)
-			return err
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Требуется метод POST",
 		})
+		return
+	}
+
+	// Trigger video sync without callback (don't restart video.play service)
+	err := TriggerSync(nil)
+	if err != nil {
+		log.Printf("Failed to trigger video sync: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось запустить загрузку видео: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "video-start-upload",
+			Result:  "success",
+			Message: "Загрузка видео запущена",
+		},
+	})
 }
 
-// HandleVideoStopUpload stops the video.upload.service via D-Bus.
+// HandleVideoStopUpload stops ongoing video sync (replaces old systemd upload service).
 func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
-	handleUploadServiceAction(w, r, "video.upload.service", "video-stop-upload",
-		"Не удалось остановить загрузку видео: %v",
-		"Таймаут остановки сервиса загрузки видео",
-		"Загрузка видео остановлена",
-		func(ctx context.Context, conn DBusConnection, ch chan string, unit string) error {
-			_, err := conn.StopUnitContext(ctx, unit, "replace", ch)
-			return err
+	if r.Method != http.MethodPost {
+		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
+			OK:     false,
+			ErrMsg: "Требуется метод POST",
 		})
+		return
+	}
+
+	err := StopSync()
+	if err != nil {
+		log.Printf("Failed to stop video sync: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось остановить загрузку видео: %v", err),
+		})
+		return
+	}
+
+	JSONResponse(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: MenuActionResponse{
+			Action:  "video-stop-upload",
+			Result:  "success",
+			Message: "Загрузка видео остановлена",
+		},
+	})
+}
+
+// restartVideoPlayService restarts the video.play service via systemd.
+func restartVideoPlayService() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := getDBusConnection(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to D-Bus: %w", err)
+	}
+	defer conn.Close()
+
+	ch := make(chan string, 1)
+	_, err = conn.RestartUnitContext(ctx, "video.play.service", "replace", ch)
+	if err != nil {
+		return fmt.Errorf("failed to restart video.play service: %w", err)
+	}
+
+	// Wait for result
+	select {
+	case result := <-ch:
+		if result != "done" {
+			return fmt.Errorf("restart failed with result: %s", result)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("restart timeout")
+	}
+}
+
+// RestartVideoPlayServiceSimple restarts the video.play service using systemctl command.
+// This is a simpler version that can be exported and used from main.
+func RestartVideoPlayServiceSimple() error {
+	cmd := exec.Command("systemctl", "restart", "video.play.service")
+	return cmd.Run()
 }
 
 // HandleScheduleGet returns the configured update timers for playlist and video uploads.

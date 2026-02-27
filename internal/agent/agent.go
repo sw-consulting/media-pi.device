@@ -55,13 +55,16 @@ type AudioConfig struct {
 // authentication key and the listen address for the HTTP API, as well as
 // all configuration settings that were previously stored only in systemd unit files.
 type Config struct {
-	AllowedUnits       []string       `yaml:"allowed_units"`
-	ServerKey          string         `yaml:"server_key,omitempty"`
-	ListenAddr         string         `yaml:"listen_addr,omitempty"`
-	MediaPiServiceUser string         `yaml:"media_pi_service_user,omitempty"`
-	Playlist           PlaylistConfig `yaml:"playlist,omitempty"`
-	Schedule           ScheduleConfig `yaml:"schedule,omitempty"`
-	Audio              AudioConfig    `yaml:"audio,omitempty"`
+	AllowedUnits         []string       `yaml:"allowed_units"`
+	ServerKey            string         `yaml:"server_key,omitempty"`
+	ListenAddr           string         `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser   string         `yaml:"media_pi_service_user,omitempty"`
+	MediaDir             string         `yaml:"media_dir,omitempty"`
+	CoreAPIBase          string         `yaml:"core_api_base,omitempty"`
+	MaxParallelDownloads int            `yaml:"max_parallel_downloads,omitempty"`
+	Playlist             PlaylistConfig `yaml:"playlist,omitempty"`
+	Schedule             ScheduleConfig `yaml:"schedule,omitempty"`
+	Audio                AudioConfig    `yaml:"audio,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -147,9 +150,12 @@ func GetVersion() string {
 // DefaultConfig returns a reasonable default Config.
 func DefaultConfig() Config {
 	return Config{
-		AllowedUnits:       []string{},
-		ListenAddr:         DefaultListenAddr,
-		MediaPiServiceUser: "pi",
+		AllowedUnits:         []string{},
+		ListenAddr:           DefaultListenAddr,
+		MediaPiServiceUser:   "pi",
+		MediaDir:             "/mnt/media-pi",
+		CoreAPIBase:          "https://vezyn.fvds.ru",
+		MaxParallelDownloads: 3,
 	}
 }
 
@@ -179,6 +185,21 @@ func LoadConfigFrom(path string) (*Config, error) {
 	// Set default media-pi service user if not specified
 	if c.MediaPiServiceUser == "" {
 		c.MediaPiServiceUser = "pi"
+	}
+
+	// Set default media directory if not specified
+	if c.MediaDir == "" {
+		c.MediaDir = "/mnt/media-pi"
+	}
+
+	// Set default core API base if not specified
+	if c.CoreAPIBase == "" {
+		c.CoreAPIBase = "https://vezyn.fvds.ru"
+	}
+
+	// Set default max parallel downloads if not specified
+	if c.MaxParallelDownloads == 0 {
+		c.MaxParallelDownloads = 3
 	}
 
 	// Migrate settings from systemd files if not present in config
