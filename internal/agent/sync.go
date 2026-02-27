@@ -55,6 +55,10 @@ var (
 	syncStopChan chan struct{}
 	syncStopOnce sync.Once
 
+	// syncReloadChan is used to signal the scheduler to reload the schedule immediately.
+	syncReloadChan     chan struct{}
+	syncReloadChanLock sync.Mutex
+
 	// syncSchedulerRunning tracks whether the scheduler is active.
 	syncSchedulerRunning     bool
 	syncSchedulerRunningLock sync.Mutex
@@ -83,6 +87,17 @@ func SetSyncSchedule(times []string) error {
 	if err := os.WriteFile(syncSchedulePath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write sync schedule: %w", err)
 	}
+
+	// Signal the scheduler to reload the schedule immediately
+	syncReloadChanLock.Lock()
+	if syncReloadChan != nil {
+		select {
+		case syncReloadChan <- struct{}{}:
+		default:
+			// Channel is full or scheduler is not listening, ignore
+		}
+	}
+	syncReloadChanLock.Unlock()
 
 	return nil
 }
@@ -537,6 +552,9 @@ func StartSyncScheduler(ctx context.Context) {
 	}
 	syncSchedulerRunning = true
 	syncStopChan = make(chan struct{})
+	syncReloadChanLock.Lock()
+	syncReloadChan = make(chan struct{}, 1) // Buffered to prevent blocking
+	syncReloadChanLock.Unlock()
 	// Store the main application context for use in handlers
 	mainAppContextLock.Lock()
 	mainAppContext = ctx
@@ -568,6 +586,10 @@ func StartSyncScheduler(ctx context.Context) {
 				case <-timer.C:
 					// Re-check schedule
 					continue
+				case <-syncReloadChan:
+					timer.Stop()
+					log.Println("Schedule reload requested, recalculating next sync time")
+					continue
 				case <-syncStopChan:
 					timer.Stop()
 					return
@@ -587,6 +609,10 @@ func StartSyncScheduler(ctx context.Context) {
 				if err := TriggerSync(ctx); err != nil {
 					log.Printf("Scheduled sync error: %v", err)
 				}
+			case <-syncReloadChan:
+				timer.Stop()
+				log.Println("Schedule reload requested, recalculating next sync time")
+				continue
 			case <-syncStopChan:
 				timer.Stop()
 				return
@@ -617,6 +643,9 @@ func StopSyncScheduler() {
 			if !stillRunning {
 				// Now it's safe to reset for next start
 				syncStopOnce = sync.Once{}
+				syncReloadChanLock.Lock()
+				syncReloadChan = nil
+				syncReloadChanLock.Unlock()
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
