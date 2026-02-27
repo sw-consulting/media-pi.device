@@ -67,6 +67,16 @@ install -m 0755 "${SCRIPT_DIR}/../setup/setup-media-pi.sh" "${ROOT}/usr/local/bi
 # systemd service file --> /etc/systemd/system
 install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/system/media-pi-agent.service"
 
+# Default sync schedule file.
+# This file must exist because the systemd unit uses ReadWritePaths= for it,
+# which triggers mount namespace setup and fails if the path is missing.
+cat > "${ROOT}/etc/systemd/system/sync.schedule.json" <<'EOF'
+{
+    "times": []
+}
+EOF
+chmod 0644 "${ROOT}/etc/systemd/system/sync.schedule.json"
+
 # Генерация правила polkit на этапе сборки.
 
 # Собираем массив уникальных имён единиц из agent.yaml
@@ -124,6 +134,7 @@ cat > "${WORK}/DEBIAN/conffiles" <<EOF
 /etc/media-pi-agent/agent.yaml
 /etc/polkit-1/rules.d/90-media-pi-agent.rules
 /etc/systemd/system/media-pi-agent.service
+/etc/systemd/system/sync.schedule.json
 EOF
 
 # Control file
@@ -171,6 +182,19 @@ set -e
 getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
 id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 
+# Ensure default sync schedule exists (older versions may not have shipped it).
+# Must be valid JSON to avoid unmarshal errors.
+SYNC_SCHEDULE="/etc/systemd/system/sync.schedule.json"
+if [ ! -f "$SYNC_SCHEDULE" ] || [ ! -s "$SYNC_SCHEDULE" ]; then
+        echo "Creating default sync schedule at $SYNC_SCHEDULE"
+        cat > "$SYNC_SCHEDULE" <<'JSON'
+{
+    "times": []
+}
+JSON
+        chmod 0644 "$SYNC_SCHEDULE" || true
+fi
+
 # Disable and stop old playlist/video upload systemd units if they exist (for upgrades)
 for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
@@ -211,6 +235,33 @@ if [ "$1" = "configure" ]; then
         echo "Media Pi Agent upgraded successfully."
         echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
         echo "The agent now uses an internal sync scheduler instead."
+        
+        # Update core_api_base in configuration if CORE_API_BASE environment variable is set
+        # Only set if not already configured (never overwrite existing values)
+        AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
+        CORE_API_BASE="${CORE_API_BASE:-https://vezyn.fvds.ru}"
+        if [ -n "${CORE_API_BASE:-}" ] && [ -f "$AGENT_CONFIG_PATH" ]; then
+            # Check if core_api_base already exists with a non-empty value
+            if grep -q '^core_api_base:' "$AGENT_CONFIG_PATH"; then
+                # Check if it's empty (empty string, null, or just whitespace after the colon)
+                CURRENT_VALUE=$(grep '^core_api_base:' "$AGENT_CONFIG_PATH" | sed 's/^core_api_base:[[:space:]]*//' | tr -d '"' | tr -d "'")
+                if [ -z "${CURRENT_VALUE}" ]; then
+                    echo "Setting core_api_base to ${CORE_API_BASE} in configuration..."
+                    sed -i "s|^core_api_base:.*|core_api_base: \"${CORE_API_BASE}\"|" "$AGENT_CONFIG_PATH"
+                else
+                    echo "core_api_base is already set, not overwriting..."
+                fi
+            else
+                # Add new line - try after media_pi_service_user, otherwise append to end
+                echo "Setting core_api_base to ${CORE_API_BASE} in configuration..."
+                if grep -q '^media_pi_service_user:' "$AGENT_CONFIG_PATH"; then
+                    sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "$AGENT_CONFIG_PATH"
+                else
+                    # Fallback: append to end of file if anchor not found
+                    echo "core_api_base: \"${CORE_API_BASE}\"" >> "$AGENT_CONFIG_PATH"
+                fi
+            fi
+        fi
         
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
