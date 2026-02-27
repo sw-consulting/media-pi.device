@@ -1923,7 +1923,7 @@ func TestScheduleReloadImmediate(t *testing.T) {
 
 	// Track when scheduler recalculates
 	recalculated := make(chan struct{}, 1)
-	
+
 	// Start scheduler
 	StartSyncScheduler(ctx)
 	time.Sleep(100 * time.Millisecond)
@@ -2065,4 +2065,3 @@ func TestSyncFilesGarbageCollectsInvalidFilenames(t *testing.T) {
 		t.Error("valid file should not have been garbage collected")
 	}
 }
-

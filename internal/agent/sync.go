@@ -98,7 +98,7 @@ func SetSyncSchedule(times []string) error {
 	// closed by StopSyncScheduler between the check and the send
 	syncReloadChanLock.Lock()
 	defer syncReloadChanLock.Unlock()
-	
+
 	if syncReloadChan != nil {
 		select {
 		case syncReloadChan <- struct{}{}:

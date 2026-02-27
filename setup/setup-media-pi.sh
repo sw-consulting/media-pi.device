@@ -35,6 +35,19 @@ if ! media-pi-agent setup; then
   exit 1
 fi
 
+# Update core_api_base in the configuration file if CORE_API_BASE is set
+if [[ -n "${CORE_API_BASE}" ]]; then
+  echo "Setting core_api_base to ${CORE_API_BASE} in configuration..."
+  # Check if core_api_base already exists in the config
+  if grep -q '^core_api_base:' "${AGENT_CONFIG_PATH}"; then
+    # Replace existing value
+    sed -i "s|^core_api_base:.*|core_api_base: \"${CORE_API_BASE}\"|" "${AGENT_CONFIG_PATH}"
+  else
+    # Add new line after media_pi_service_user (to maintain logical grouping)
+    sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "${AGENT_CONFIG_PATH}"
+  fi
+fi
+
 # Extract server key from configuration
 if [[ ! -f "${AGENT_CONFIG_PATH}" ]]; then
   echo "Error: Configuration file not found at ${AGENT_CONFIG_PATH}" >&2
