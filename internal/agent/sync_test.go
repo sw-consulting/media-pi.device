@@ -63,7 +63,7 @@ func TestFetchManifest(t *testing.T) {
 					t.Errorf("unexpected path: %s", r.URL.Path)
 				}
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.serverResponse))
+				_, _ = w.Write([]byte(tt.serverResponse))
 			}))
 			defer server.Close()
 
@@ -95,7 +95,7 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"items": []}`))
+		_, _ = w.Write([]byte(`{"items": []}`))
 	}))
 	defer server.Close()
 
@@ -179,7 +179,7 @@ func TestDownloadFile(t *testing.T) {
 					t.Errorf("unexpected path: %s, want %s", r.URL.Path, expectedPath)
 				}
 				w.WriteHeader(tt.statusCode)
-				w.Write([]byte(tt.serverResponse))
+				_, _ = w.Write([]byte(tt.serverResponse))
 			}))
 			defer server.Close()
 
@@ -223,7 +223,7 @@ func TestDownloadFile_WithAuth(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(testContent))
+		_, _ = w.Write([]byte(testContent))
 	}))
 	defer server.Close()
 
@@ -252,7 +252,7 @@ func TestVerifyLocalFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	testContent := "test content"
-	os.WriteFile(testFile, []byte(testContent), 0644)
+	_ = os.WriteFile(testFile, []byte(testContent), 0644)
 
 	tests := []struct {
 		name    string
@@ -330,7 +330,7 @@ func TestSyncFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/devicesync/1" {
 			// Return file content
-			w.Write([]byte(testContent))
+			_, _ = w.Write([]byte(testContent))
 		}
 	}))
 	defer server.Close()
@@ -422,13 +422,13 @@ func TestSyncFiles_GarbageCollection(t *testing.T) {
 
 	// Create old files that should be removed
 	oldFile := filepath.Join(tmpDir, "old.txt")
-	os.WriteFile(oldFile, []byte("old"), 0644)
+	_ = os.WriteFile(oldFile, []byte("old"), 0644)
 
 	// Create subdirectory with old file
 	subDir := filepath.Join(tmpDir, "subdir")
-	os.MkdirAll(subDir, 0755)
+	_ = os.MkdirAll(subDir, 0755)
 	oldSubFile := filepath.Join(subDir, "old_sub.txt")
-	os.WriteFile(oldSubFile, []byte("old sub"), 0644)
+	_ = os.WriteFile(oldSubFile, []byte("old sub"), 0644)
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
@@ -459,7 +459,7 @@ func TestSyncFiles_GarbageCollectsInvalidFilenames(t *testing.T) {
 
 	// Create a file that should be garbage collected
 	garbageFile := filepath.Join(tmpDir, "garbage.txt")
-	os.WriteFile(garbageFile, []byte("garbage"), 0644)
+	_ = os.WriteFile(garbageFile, []byte("garbage"), 0644)
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
@@ -495,10 +495,11 @@ func TestSyncFiles_WithSubdirectories(t *testing.T) {
 
 	// Create test server that serves files
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/devicesync/1" {
-			w.Write([]byte("content1"))
-		} else if r.URL.Path == "/api/devicesync/2" {
-			w.Write([]byte("content2"))
+		switch r.URL.Path {
+		case "/api/devicesync/1":
+			_, _ = w.Write([]byte("content1"))
+		case "/api/devicesync/2":
+			_, _ = w.Write([]byte("content2"))
 		}
 	}))
 	defer server.Close()
@@ -594,7 +595,7 @@ func TestLoadSyncSchedule(t *testing.T) {
 	// Test with valid file
 	testSchedule := SyncSchedule{Times: []string{"10:30", "14:45"}}
 	data, _ := json.Marshal(testSchedule)
-	os.WriteFile(syncScheduleFilePath, data, 0644)
+	_ = os.WriteFile(syncScheduleFilePath, data, 0644)
 
 	err = LoadSyncSchedule()
 	if err != nil {
@@ -664,7 +665,7 @@ func TestDownloadPlaylist(t *testing.T) {
 				}
 				w.WriteHeader(tt.statusCode)
 				if tt.serverResponse != "" {
-					w.Write([]byte(tt.serverResponse))
+					_, _ = w.Write([]byte(tt.serverResponse))
 				}
 			}))
 			defer server.Close()
@@ -695,7 +696,7 @@ func TestPerformPlaylistSync(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test playlist"))
+		_, _ = w.Write([]byte("test playlist"))
 	}))
 	defer server.Close()
 
@@ -743,7 +744,7 @@ func TestTriggerSync_StopSync(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(Manifest{Items: []ManifestItem{}})
+		_ = json.NewEncoder(w).Encode(Manifest{Items: []ManifestItem{}})
 	}))
 	defer server.Close()
 
@@ -776,9 +777,9 @@ func TestGarbageCollect(t *testing.T) {
 	file2 := filepath.Join(tmpDir, "file2.txt")
 	tmpFile := filepath.Join(tmpDir, "temp.tmp")
 
-	os.WriteFile(file1, []byte("content1"), 0644)
-	os.WriteFile(file2, []byte("content2"), 0644)
-	os.WriteFile(tmpFile, []byte("temp"), 0644)
+	_ = os.WriteFile(file1, []byte("content1"), 0644)
+	_ = os.WriteFile(file2, []byte("content2"), 0644)
+	_ = os.WriteFile(tmpFile, []byte("temp"), 0644)
 
 	// Only file1 is expected
 	expectedFiles := map[string]struct{}{

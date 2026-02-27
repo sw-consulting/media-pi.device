@@ -209,7 +209,7 @@ func fetchManifest(ctx context.Context, config Config) (*Manifest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch manifest: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -240,7 +240,7 @@ func downloadFile(ctx context.Context, config Config, item ManifestItem, destPat
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -254,7 +254,7 @@ func downloadFile(ctx context.Context, config Config, item ManifestItem, destPat
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpPath)
 	}()
 
@@ -309,7 +309,7 @@ func verifyLocalFile(path string, item ManifestItem) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
@@ -550,7 +550,7 @@ func downloadPlaylist(ctx context.Context, config Config) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to download playlist: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNoContent {
 		// No playlist to activate
