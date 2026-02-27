@@ -901,8 +901,13 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger playlist sync with callback to restart video.play service
+	// Trigger both file sync and playlist download with callback to restart video.play service
 	err := TriggerSync(func() {
+		log.Println("File sync completed, downloading playlist")
+		// Download the playlist file
+		if err := PerformPlaylistSync(context.Background()); err != nil {
+			log.Printf("Warning: Failed to download playlist: %v", err)
+		}
 		log.Println("Playlist sync completed, restarting video.play service")
 		if err := restartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart video.play service: %v", err)

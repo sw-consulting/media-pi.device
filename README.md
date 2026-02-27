@@ -136,14 +136,15 @@ sudo systemctl status media-pi-agent
 Параметры в `/etc/media-pi-agent/agent.yaml`:
 
 ```yaml
-# Директория для синхронизированных файлов
-media_dir: "/mnt/media-pi"
-
 # Базовый URL API сервера управления
 core_api_base: "https://vezyn.fvds.ru"
 
 # Максимальное количество параллельных загрузок (зарезервировано для будущего использования)
 max_parallel_downloads: 3
+
+# Конфигурация плейлиста (директория для файлов определяется из destination)
+playlist:
+  destination: "/var/media-pi/playlist.json"
 
 # Расписание синхронизации
 schedule:
@@ -161,7 +162,7 @@ schedule:
 
 # Конфигурация плейлиста
 playlist:
-  destination: "/mnt/media-pi/playlist.json"
+  destination: "/var/media-pi/playlist.json"
 ```
 
 ### Автоматическая синхронизация
@@ -245,12 +246,11 @@ allowed_units:
 server_key: "auto-generated-key"
 listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
-media_dir: "/mnt/media-pi"
 core_api_base: "https://vezyn.fvds.ru"
 max_parallel_downloads: 3
 
 playlist:
-  destination: "/mnt/media-pi/playlist.json"
+  destination: "/var/media-pi/playlist.json"
 
 schedule:
   playlist:
@@ -272,10 +272,9 @@ audio:
 - `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
 - `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
 - `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`)
-- `media_dir` — директория для синхронизированных медиа файлов (по умолчанию: `/mnt/media-pi`)
 - `core_api_base` — базовый URL API сервера управления (по умолчанию: `https://vezyn.fvds.ru`)
 - `max_parallel_downloads` — максимальное количество параллельных загрузок (по умолчанию: 3, зарезервировано для будущего использования)
-- `playlist.destination` — путь для сохранения загруженного плейлиста
+- `playlist.destination` — путь для сохранения загруженного плейлиста и директория для синхронизированных медиа файлов (по умолчанию: `/var/media-pi/playlist.json`)
 - `schedule.playlist` — времена автоматической синхронизации плейлиста (формат HH:MM)
 - `schedule.video` — времена автоматической синхронизации видео файлов (формат HH:MM)
 - `schedule.rest` — интервалы отдыха, когда воспроизведение останавливается

@@ -59,7 +59,6 @@ type Config struct {
 	ServerKey            string         `yaml:"server_key,omitempty"`
 	ListenAddr           string         `yaml:"listen_addr,omitempty"`
 	MediaPiServiceUser   string         `yaml:"media_pi_service_user,omitempty"`
-	MediaDir             string         `yaml:"media_dir,omitempty"`
 	CoreAPIBase          string         `yaml:"core_api_base,omitempty"`
 	MaxParallelDownloads int            `yaml:"max_parallel_downloads,omitempty"`
 	Playlist             PlaylistConfig `yaml:"playlist,omitempty"`
@@ -153,9 +152,11 @@ func DefaultConfig() Config {
 		AllowedUnits:         []string{},
 		ListenAddr:           DefaultListenAddr,
 		MediaPiServiceUser:   "pi",
-		MediaDir:             "/mnt/media-pi",
 		CoreAPIBase:          "https://vezyn.fvds.ru",
 		MaxParallelDownloads: 3,
+		Playlist: PlaylistConfig{
+			Destination: "/var/media-pi/playlist.json",
+		},
 	}
 }
 
@@ -187,9 +188,9 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MediaPiServiceUser = "pi"
 	}
 
-	// Set default media directory if not specified
-	if c.MediaDir == "" {
-		c.MediaDir = "/mnt/media-pi"
+	// Set default playlist destination if not specified
+	if c.Playlist.Destination == "" {
+		c.Playlist.Destination = "/var/media-pi/playlist.json"
 	}
 
 	// Set default core API base if not specified

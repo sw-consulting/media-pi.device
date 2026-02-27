@@ -338,7 +338,7 @@ func TestSyncFiles(t *testing.T) {
 	config := Config{
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-key",
-		MediaDir:    tmpDir,
+		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.json")},
 	}
 
 	manifest := &Manifest{
@@ -385,7 +385,7 @@ func TestSyncFiles_PreventPathTraversal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := Config{
 				CoreAPIBase: "http://example.com",
-				MediaDir:    tmpDir,
+				Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.json")},
 			}
 
 			manifest := &Manifest{
@@ -432,7 +432,7 @@ func TestSyncFiles_GarbageCollection(t *testing.T) {
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		MediaDir:    tmpDir,
+		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.json")},
 	}
 
 	// Empty manifest - all files should be garbage collected
@@ -463,7 +463,7 @@ func TestSyncFiles_GarbageCollectsInvalidFilenames(t *testing.T) {
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		MediaDir:    tmpDir,
+		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.json")},
 	}
 
 	// Manifest with invalid filename
@@ -506,7 +506,7 @@ func TestSyncFiles_WithSubdirectories(t *testing.T) {
 	config := Config{
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-key",
-		MediaDir:    tmpDir,
+		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.json")},
 	}
 
 	manifest := &Manifest{
@@ -733,7 +733,7 @@ func TestTriggerSync_StopSync(t *testing.T) {
 	// Mock config
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		MediaDir:    t.TempDir(),
+		Playlist:    PlaylistConfig{Destination: filepath.Join(t.TempDir(), "playlist.json")},
 	}
 	configMutex.Lock()
 	currentConfig = &config
@@ -809,7 +809,7 @@ func TestGarbageCollect(t *testing.T) {
 func TestContextCancellation(t *testing.T) {
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		MediaDir:    t.TempDir(),
+		Playlist:    PlaylistConfig{Destination: filepath.Join(t.TempDir(), "playlist.json")},
 	}
 
 	// Create context that's already cancelled

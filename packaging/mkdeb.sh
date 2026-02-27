@@ -196,7 +196,7 @@ if [ "$1" = "configure" ] && [ -n "$2" ]; then
 fi
 
 # Check if media directory exists and warn if not
-MEDIA_DIR="/mnt/media-pi"
+MEDIA_DIR="/var/media-pi"
 if [ ! -d "$MEDIA_DIR" ]; then
     echo "Warning: Media directory $MEDIA_DIR does not exist."
     echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."

@@ -322,8 +322,14 @@ func verifyLocalFile(path string, item ManifestItem) (bool, error) {
 
 // syncFiles synchronizes files from the manifest to the local media directory.
 func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
+	// Get media directory from playlist destination
+	mediaDir := filepath.Dir(config.Playlist.Destination)
+	if mediaDir == "" || mediaDir == "." {
+		mediaDir = "/var/media-pi"
+	}
+
 	// Ensure media directory exists
-	if err := os.MkdirAll(config.MediaDir, 0755); err != nil {
+	if err := os.MkdirAll(mediaDir, 0755); err != nil {
 		return fmt.Errorf("failed to create media directory: %w", err)
 	}
 
@@ -349,7 +355,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 		}
 
 		// Mark as expected
-		fullPath := filepath.Join(config.MediaDir, item.Filename)
+		fullPath := filepath.Join(mediaDir, item.Filename)
 		expectedFiles[fullPath] = struct{}{}
 	}
 
@@ -371,7 +377,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 		default:
 		}
 
-		fullPath := filepath.Join(config.MediaDir, item.Filename)
+		fullPath := filepath.Join(mediaDir, item.Filename)
 
 		// Ensure subdirectories exist
 		dir := filepath.Dir(fullPath)
@@ -395,7 +401,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	}
 
 	// Garbage collect files not in manifest
-	if err := garbageCollect(config.MediaDir, expectedFiles); err != nil {
+	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
 		log.Printf("Warning: Garbage collection errors: %v", err)
 	}
 
@@ -631,9 +637,16 @@ func schedulerLoop() {
 
 		// Add scheduled tasks
 		for _, timeStr := range schedule.Times {
-			// Parse time format (HH:MM)
+			// Parse time format (HH:MM) and convert to cron format (MM HH)
 			timeStr := timeStr // capture loop variable
-			_, err := cronScheduler.AddFunc(fmt.Sprintf("0 %s * * *", timeStr), func() {
+			parts := strings.Split(timeStr, ":")
+			if len(parts) != 2 {
+				log.Printf("Warning: Invalid time format '%s', expected HH:MM", timeStr)
+				continue
+			}
+			// Convert HH:MM to MM HH for cron
+			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
+			_, err := cronScheduler.AddFunc(cronSpec, func() {
 				log.Printf("Running scheduled sync at %s", timeStr)
 				if err := PerformSync(context.Background()); err != nil {
 					log.Printf("Scheduled sync error: %v", err)
