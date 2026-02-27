@@ -229,10 +229,6 @@ func downloadFile(ctx context.Context, item ManifestItem, destPath string) error
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
 	// Verify file size
 	if bytesWritten != item.FileSizeBytes {
 		return fmt.Errorf("file size mismatch: expected %d, got %d", item.FileSizeBytes, bytesWritten)
