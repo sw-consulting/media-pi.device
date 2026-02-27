@@ -356,13 +356,9 @@ func syncFiles(ctx context.Context) error {
 
 	log.Printf("Fetched manifest with %d items", len(manifest))
 
-	// Build map of expected files
+	// Build map of expected files for those that pass validation.
+	// Files with invalid filenames will be excluded from this map and garbage collected during cleanup.
 	expectedFiles := make(map[string]ManifestItem)
-	for _, item := range manifest {
-		expectedFiles[item.Filename] = item
-	}
-
-	// Collect files that need to be downloaded
 	var toDownload []ManifestItem
 	for _, item := range manifest {
 		// Validate filename to prevent path traversal
@@ -370,6 +366,9 @@ func syncFiles(ctx context.Context) error {
 			log.Printf("Warning: skipping invalid filename %q: %v", item.Filename, err)
 			continue
 		}
+
+		// Add to expected files map only after validation
+		expectedFiles[item.Filename] = item
 
 		destPath := filepath.Join(MediaDir, item.Filename)
 		if !verifyLocalFile(destPath, item) {
