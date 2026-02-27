@@ -236,6 +236,25 @@ if [ "$1" = "configure" ]; then
         echo "Note: Old playlist.upload and video.upload systemd units have been disabled."
         echo "The agent now uses an internal sync scheduler instead."
         
+        # Update core_api_base in configuration if CORE_API_BASE environment variable is set
+        AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
+        if [ -n "${CORE_API_BASE:-}" ] && [ -f "$AGENT_CONFIG_PATH" ]; then
+            echo "Updating core_api_base to ${CORE_API_BASE} in configuration..."
+            # Check if core_api_base already exists in the config
+            if grep -q '^core_api_base:' "$AGENT_CONFIG_PATH"; then
+                # Replace existing value
+                sed -i "s|^core_api_base:.*|core_api_base: \"${CORE_API_BASE}\"|" "$AGENT_CONFIG_PATH"
+            else
+                # Add new line - try after media_pi_service_user, otherwise append to end
+                if grep -q '^media_pi_service_user:' "$AGENT_CONFIG_PATH"; then
+                    sed -i "/^media_pi_service_user:/a core_api_base: \"${CORE_API_BASE}\"" "$AGENT_CONFIG_PATH"
+                else
+                    # Fallback: append to end of file if anchor not found
+                    echo "core_api_base: \"${CORE_API_BASE}\"" >> "$AGENT_CONFIG_PATH"
+                fi
+            fi
+        fi
+        
         # If service was enabled before upgrade, restart it
         if systemctl is-enabled --quiet media-pi-agent.service 2>/dev/null; then
             echo "Restarting media-pi-agent service..."
