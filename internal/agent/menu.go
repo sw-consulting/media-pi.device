@@ -1068,9 +1068,16 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	// be populated via migration if still missing.
 	cfg := GetCurrentConfig()
 	
-	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
-	for i, p := range restPairs {
-		restConfigPairs[i] = RestTimePairConfig(p)
+	// Preserve existing rest configuration if not provided in request
+	var restConfigPairs []RestTimePairConfig
+	if req.Rest != nil {
+		restConfigPairs = make([]RestTimePairConfig, len(restPairs))
+		for i, p := range restPairs {
+			restConfigPairs[i] = RestTimePairConfig(p)
+		}
+	} else {
+		// Keep existing rest configuration when not provided
+		restConfigPairs = cfg.Schedule.Rest
 	}
 
 	if err := UpdateConfigSettings(

@@ -315,6 +315,103 @@ func TestHandleScheduleUpdate_DualWrite(t *testing.T) {
 	}
 }
 
+func TestHandleScheduleUpdate_PreservesRestWhenOmitted(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	playlistTimer := filepath.Join(tmp, "playlist.upload.timer")
+	videoTimer := filepath.Join(tmp, "video.upload.timer")
+	configPath := filepath.Join(tmp, "agent.yaml")
+
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalConfigPath := ConfigPath
+	PlaylistTimerPath = playlistTimer
+	VideoTimerPath = videoTimer
+	ConfigPath = configPath
+	t.Cleanup(func() {
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		ConfigPath = originalConfigPath
+	})
+
+	// Set up test config with existing rest times
+	existingRestTimes := []RestTimePairConfig{
+		{Start: "20:00", Stop: "08:00"},
+		{Start: "12:00", Stop: "13:00"},
+	}
+	testConfig := &Config{
+		AllowedUnits:       []string{"test.service"},
+		ServerKey:          "test-key",
+		ListenAddr:         "0.0.0.0:8081",
+		MediaPiServiceUser: "pi",
+		Playlist: PlaylistConfig{
+			Source:      "/test/src/",
+			Destination: "/test/dst/",
+		},
+		Schedule: ScheduleConfig{
+			Playlist: []string{"10:00"},
+			Video:    []string{"20:00"},
+			Rest:     existingRestTimes,
+		},
+		Audio: AudioConfig{
+			Output: "hdmi",
+		},
+	}
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = testConfig
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	// Make request WITHOUT Rest field (omitted, not empty array)
+	reqBody := ScheduleUpdateRequest{
+		Playlist: []string{"11:00", "17:00"},
+		Video:    []string{"23:00"},
+		Rest:     nil, // Explicitly omitted
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/schedule/update", bytes.NewReader(body))
+	req.Header.Set("Authorization", "******")
+	w := httptest.NewRecorder()
+
+	HandleScheduleUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify agent config preserved existing rest times
+	cfg := GetCurrentConfig()
+	if len(cfg.Schedule.Rest) != 2 {
+		t.Errorf("expected 2 rest time pairs preserved, got %d: %v", len(cfg.Schedule.Rest), cfg.Schedule.Rest)
+	}
+	if len(cfg.Schedule.Rest) > 0 && (cfg.Schedule.Rest[0].Start != "20:00" || cfg.Schedule.Rest[0].Stop != "08:00") {
+		t.Errorf("first rest time not preserved: got %s-%s", cfg.Schedule.Rest[0].Start, cfg.Schedule.Rest[0].Stop)
+	}
+	if len(cfg.Schedule.Rest) > 1 && (cfg.Schedule.Rest[1].Start != "12:00" || cfg.Schedule.Rest[1].Stop != "13:00") {
+		t.Errorf("second rest time not preserved: got %s-%s", cfg.Schedule.Rest[1].Start, cfg.Schedule.Rest[1].Stop)
+	}
+
+	// Verify playlist and video schedules were updated
+	if len(cfg.Schedule.Playlist) != 2 || cfg.Schedule.Playlist[0] != "11:00" || cfg.Schedule.Playlist[1] != "17:00" {
+		t.Errorf("config playlist schedule not updated: %v", cfg.Schedule.Playlist)
+	}
+	if len(cfg.Schedule.Video) != 1 || cfg.Schedule.Video[0] != "23:00" {
+		t.Errorf("config video schedule not updated: %v", cfg.Schedule.Video)
+	}
+}
+
 func TestHandleScheduleGet_ReadsFromConfig(t *testing.T) {
 	ServerKey = "test-key"
 
