@@ -175,6 +175,11 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MaxParallelDownloads = 3
 	}
 
+	// Set default core API base if not specified
+	if c.CoreAPIBase == "" {
+		c.CoreAPIBase = "https://vezyn.fvds.ru"
+	}
+
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
