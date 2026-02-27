@@ -94,13 +94,14 @@ func SetSyncSchedule(times []string) error {
 	}
 
 	// Signal the scheduler to reload the schedule immediately
+	// Keep the lock held during the send to prevent the channel from being
+	// closed by StopSyncScheduler between the check and the send
 	syncReloadChanLock.Lock()
-	ch := syncReloadChan
-	syncReloadChanLock.Unlock()
+	defer syncReloadChanLock.Unlock()
 	
-	if ch != nil {
+	if syncReloadChan != nil {
 		select {
-		case ch <- struct{}{}:
+		case syncReloadChan <- struct{}{}:
 			// Successfully sent reload signal
 		default:
 			// Channel is full or not being read, ignore
