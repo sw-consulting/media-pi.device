@@ -20,19 +20,48 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+// RestTimePairConfig describes a single rest-time interval with start and stop times.
+type RestTimePairConfig struct {
+	Start string `yaml:"start" json:"start"` // When rest begins (service stops)
+	Stop  string `yaml:"stop" json:"stop"`   // When rest ends (service starts)
+}
+
+// PlaylistConfig represents playlist upload configuration.
+type PlaylistConfig struct {
+	Source      string `yaml:"source,omitempty" json:"source,omitempty"`
+	Destination string `yaml:"destination,omitempty" json:"destination,omitempty"`
+}
+
+// ScheduleConfig represents schedule times for playlist/video uploads and rest periods.
+type ScheduleConfig struct {
+	Playlist []string             `yaml:"playlist,omitempty" json:"playlist,omitempty"`
+	Video    []string             `yaml:"video,omitempty" json:"video,omitempty"`
+	Rest     []RestTimePairConfig `yaml:"rest,omitempty" json:"rest,omitempty"`
+}
+
+// AudioConfig describes the audio output setting.
+type AudioConfig struct {
+	Output string `yaml:"output,omitempty" json:"output,omitempty"`
+}
+
 // Config represents the agent configuration file structure. It is loaded
 // from YAML and contains the list of allowed systemd units, the server
-// authentication key and the listen address for the HTTP API.
+// authentication key and the listen address for the HTTP API, as well as
+// all configuration settings that were previously stored only in systemd unit files.
 type Config struct {
-	AllowedUnits       []string `yaml:"allowed_units"`
-	ServerKey          string   `yaml:"server_key,omitempty"`
-	ListenAddr         string   `yaml:"listen_addr,omitempty"`
-	MediaPiServiceUser string   `yaml:"media_pi_service_user,omitempty"`
+	AllowedUnits       []string       `yaml:"allowed_units"`
+	ServerKey          string         `yaml:"server_key,omitempty"`
+	ListenAddr         string         `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser string         `yaml:"media_pi_service_user,omitempty"`
+	Playlist           PlaylistConfig `yaml:"playlist,omitempty"`
+	Schedule           ScheduleConfig `yaml:"schedule,omitempty"`
+	Audio              AudioConfig    `yaml:"audio,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -82,6 +111,11 @@ var (
 	// MediaPiServiceUser is the username for crontab and systemd timer operations.
 	// It defaults to "pi" and is loaded from the configuration.
 	MediaPiServiceUser string
+
+	// currentConfig holds the loaded configuration including all settings.
+	// Access to this variable should be protected by configMutex.
+	currentConfig *Config
+	configMutex   sync.RWMutex
 )
 
 // DefaultListenAddr is used when the configuration does not specify a
@@ -121,7 +155,8 @@ func DefaultConfig() Config {
 
 // LoadConfigFrom loads configuration from path and updates package-level
 // state (AllowedUnits, ServerKey). It returns the parsed Config to the
-// caller for further use.
+// caller for further use. It also performs migration of settings from systemd
+// files on first run when those settings are missing in the YAML.
 func LoadConfigFrom(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -146,11 +181,156 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MediaPiServiceUser = "pi"
 	}
 
+	// Migrate settings from systemd files if not present in config
+	needsSave := false
+	if err := migrateConfigFromSystemd(&c, &needsSave); err != nil {
+		log.Printf("Warning: Failed to migrate some settings from systemd: %v", err)
+	}
+
+	// Save migrated configuration if needed
+	if needsSave {
+		if err := saveConfigToFile(path, &c); err != nil {
+			log.Printf("Warning: Failed to save migrated configuration: %v", err)
+		}
+	}
+
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
 
+	// Store the configuration for later access
+	configMutex.Lock()
+	currentConfig = &c
+	configMutex.Unlock()
+
 	return &c, nil
+}
+
+// GetCurrentConfig returns a copy of the current configuration.
+// This function is thread-safe.
+func GetCurrentConfig() Config {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	if currentConfig == nil {
+		return DefaultConfig()
+	}
+	// Return a copy to prevent external modifications
+	return *currentConfig
+}
+
+// UpdateConfigSettings updates the configuration settings in memory and saves to file.
+// This function is thread-safe.
+func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audio AudioConfig) error {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	if currentConfig == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+
+	// Update in-memory config
+	currentConfig.Playlist = playlist
+	currentConfig.Schedule = schedule
+	currentConfig.Audio = audio
+
+	// Save to file
+	if ConfigPath == "" {
+		return fmt.Errorf("config path is not set")
+	}
+
+	return saveConfigToFile(ConfigPath, currentConfig)
+}
+
+// saveConfigToFile writes the configuration to a YAML file.
+// This function is NOT thread-safe and should be called with configMutex held or from LoadConfigFrom.
+func saveConfigToFile(path string, c *Config) error {
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Write to temp file first, then rename for atomic update
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write temp config file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to rename config file: %w", err)
+	}
+
+	return nil
+}
+
+// migrateConfigFromSystemd reads settings from systemd unit files and populates
+// the config if those settings are missing. It sets needsSave to true if any
+// settings were migrated.
+func migrateConfigFromSystemd(c *Config, needsSave *bool) error {
+	var migrationErrors []string
+
+	// Migrate playlist upload paths if not set
+	if c.Playlist.Source == "" || c.Playlist.Destination == "" {
+		if cfg, err := readPlaylistUploadConfigForMigration(); err == nil {
+			c.Playlist.Source = cfg.Source
+			c.Playlist.Destination = cfg.Destination
+			*needsSave = true
+			log.Printf("Migrated playlist upload config from systemd: source=%s, destination=%s",
+				cfg.Source, cfg.Destination)
+		} else {
+			migrationErrors = append(migrationErrors, fmt.Sprintf("playlist paths: %v", err))
+		}
+	}
+
+	// Migrate playlist schedule if not set
+	if len(c.Schedule.Playlist) == 0 {
+		if times, err := readTimerScheduleForMigration(playlistTimerPathForMigration()); err == nil && len(times) > 0 {
+			c.Schedule.Playlist = times
+			*needsSave = true
+			log.Printf("Migrated playlist schedule from systemd: %v", times)
+		} else if err != nil {
+			migrationErrors = append(migrationErrors, fmt.Sprintf("playlist schedule: %v", err))
+		}
+	}
+
+	// Migrate video schedule if not set
+	if len(c.Schedule.Video) == 0 {
+		if times, err := readTimerScheduleForMigration(videoTimerPathForMigration()); err == nil && len(times) > 0 {
+			c.Schedule.Video = times
+			*needsSave = true
+			log.Printf("Migrated video schedule from systemd: %v", times)
+		} else if err != nil {
+			migrationErrors = append(migrationErrors, fmt.Sprintf("video schedule: %v", err))
+		}
+	}
+
+	// Migrate rest times if not set
+	if len(c.Schedule.Rest) == 0 {
+		if pairs, err := getRestTimesForMigration(); err == nil && len(pairs) > 0 {
+			c.Schedule.Rest = pairs
+			*needsSave = true
+			log.Printf("Migrated rest times from crontab: %v", pairs)
+		} else if err != nil {
+			migrationErrors = append(migrationErrors, fmt.Sprintf("rest times: %v", err))
+		}
+	}
+
+	// Migrate audio output if not set
+	if c.Audio.Output == "" {
+		if settings, err := readAudioSettingsForMigration(); err == nil && settings.Output != "" && settings.Output != "unknown" {
+			c.Audio.Output = settings.Output
+			*needsSave = true
+			log.Printf("Migrated audio output from asound.conf: %s", settings.Output)
+		} else if err != nil {
+			migrationErrors = append(migrationErrors, fmt.Sprintf("audio output: %v", err))
+		}
+	}
+
+	if len(migrationErrors) > 0 {
+		return fmt.Errorf("migration errors: %s", strings.Join(migrationErrors, "; "))
+	}
+
+	return nil
 }
 
 // ReloadConfig reloads configuration from the previously set ConfigPath.

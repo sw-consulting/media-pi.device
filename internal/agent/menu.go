@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -585,40 +586,31 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playlistCfg, err := readPlaylistUploadConfig(PlaylistServicePath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать конфигурацию: %v", err)})
-		return
-	}
+	// Read configuration from agent.yaml instead of systemd files
+	cfg := GetCurrentConfig()
 
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err)})
-		return
-	}
-
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err)})
-		return
-	}
-
-	restTimes, err := getRestTimes()
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать crontab: %v", err)})
-		return
-	}
-
-	audioSettings, err := readAudioSettings()
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: err.Error()})
-		return
+	// Convert RestTimePairConfig to RestTimePair for the response
+	restPairs := make([]RestTimePair, len(cfg.Schedule.Rest))
+	for i, r := range cfg.Schedule.Rest {
+		restPairs[i] = RestTimePair{
+			Start: r.Start,
+			Stop:  r.Stop,
+		}
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
-		Playlist: playlistCfg,
-		Schedule: ScheduleSettings{Playlist: playlistTimers, Video: videoTimers, Rest: restTimes},
-		Audio:    audioSettings,
+		Playlist: PlaylistUploadConfig{
+			Source:      cfg.Playlist.Source,
+			Destination: cfg.Playlist.Destination,
+		},
+		Schedule: ScheduleSettings{
+			Playlist: cfg.Schedule.Playlist,
+			Video:    cfg.Schedule.Video,
+			Rest:     restPairs,
+		},
+		Audio: AudioSettings{
+			Output: cfg.Audio.Output,
+		},
 	}})
 }
 
@@ -698,6 +690,24 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := writeAudioSettings(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
+	}
+
+	// Update configuration file with all settings
+	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
+	for i, p := range restPairs {
+		restConfigPairs[i] = RestTimePairConfig{
+			Start: p.Start,
+			Stop:  p.Stop,
+		}
+	}
+
+	if err := UpdateConfigSettings(
+		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
+		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
+		AudioConfig{Output: req.Audio.Output},
+	); err != nil {
+		log.Printf("Warning: Failed to update config file: %v", err)
+		// Don't fail the request if config file update fails, as systemd files are updated
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-update", Result: "success", Message: "Конфигурация обновлена"}})
@@ -942,39 +952,24 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playlistTimers, err := readTimerSchedule(PlaylistTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
+	// Read schedule from agent.yaml instead of systemd files
+	cfg := GetCurrentConfig()
 
-	videoTimers, err := readTimerSchedule(VideoTimerPath)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать файл таймера видео: %v", err),
-		})
-		return
-	}
-
-	restTimes, err := getRestTimes()
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось прочитать crontab: %v", err),
-		})
-		return
+	// Convert RestTimePairConfig to RestTimePair for the response
+	restPairs := make([]RestTimePair, len(cfg.Schedule.Rest))
+	for i, r := range cfg.Schedule.Rest {
+		restPairs[i] = RestTimePair{
+			Start: r.Start,
+			Stop:  r.Stop,
+		}
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: ScheduleResponse{
-			Playlist: playlistTimers,
-			Video:    videoTimers,
-			Rest:     restTimes,
+			Playlist: cfg.Schedule.Playlist,
+			Video:    cfg.Schedule.Video,
+			Rest:     restPairs,
 		},
 	})
 }
@@ -1070,6 +1065,27 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	// Update configuration file with schedule settings
+	// Get current config to preserve other settings
+	cfg := GetCurrentConfig()
+	
+	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
+	for i, p := range restPairs {
+		restConfigPairs[i] = RestTimePairConfig{
+			Start: p.Start,
+			Stop:  p.Stop,
+		}
+	}
+
+	if err := UpdateConfigSettings(
+		cfg.Playlist, // Keep existing playlist config
+		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
+		cfg.Audio, // Keep existing audio config
+	); err != nil {
+		log.Printf("Warning: Failed to update config file: %v", err)
+		// Don't fail the request if config file update fails, as systemd files are updated
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
@@ -1639,4 +1655,43 @@ func writeTimerSchedule(filePath, description, unit string, times []string) erro
 func isValidTimeFormat(timeStr string) bool {
 	_, _, err := parseHourMinute(timeStr)
 	return err == nil
+}
+
+// Migration helper functions - these wrappers allow agent.go to call menu.go functions
+// during configuration migration without creating circular dependencies.
+
+func readPlaylistUploadConfigForMigration() (PlaylistUploadConfig, error) {
+	return readPlaylistUploadConfig(PlaylistServicePath)
+}
+
+func playlistTimerPathForMigration() string {
+	return PlaylistTimerPath
+}
+
+func videoTimerPathForMigration() string {
+	return VideoTimerPath
+}
+
+func readTimerScheduleForMigration(filePath string) ([]string, error) {
+	return readTimerSchedule(filePath)
+}
+
+func getRestTimesForMigration() ([]RestTimePairConfig, error) {
+	pairs, err := getRestTimes()
+	if err != nil {
+		return nil, err
+	}
+	// Convert from RestTimePair to RestTimePairConfig
+	result := make([]RestTimePairConfig, len(pairs))
+	for i, p := range pairs {
+		result[i] = RestTimePairConfig{
+			Start: p.Start,
+			Stop:  p.Stop,
+		}
+	}
+	return result, nil
+}
+
+func readAudioSettingsForMigration() (AudioSettings, error) {
+	return readAudioSettings()
 }
