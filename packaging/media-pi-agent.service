@@ -28,8 +28,18 @@ ExecReload=/bin/kill -HUP $MAINPID
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-# Allow writes to the agent config dir, audio config, sync schedule/status, and required sync/cron paths
-ReadWritePaths=/etc/media-pi-agent /etc/asound.conf /etc/systemd/system/sync.schedule.json /var/lib/media-pi /var/spool/cron /var/spool/cron/crontabs
+# Allow writes to agent config, audio config, and media library
+ReadWritePaths=/etc/media-pi-agent
+ReadWritePaths=/etc/asound.conf
+ReadWritePaths=/var/lib/media-pi
+# Allow writes to systemd sync schedule and upload service/timer files
+ReadWritePaths=/etc/systemd/system/sync.schedule.json
+ReadWritePaths=/etc/systemd/system/playlist.upload.service
+ReadWritePaths=/etc/systemd/system/playlist.upload.timer
+ReadWritePaths=/etc/systemd/system/video.upload.timer
+# Allow writes to cron directories for scheduled tasks
+ReadWritePaths=/var/spool/cron
+ReadWritePaths=/var/spool/cron/crontabs
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
