@@ -592,10 +592,7 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	// Convert RestTimePairConfig to RestTimePair for the response
 	restPairs := make([]RestTimePair, len(cfg.Schedule.Rest))
 	for i, r := range cfg.Schedule.Rest {
-		restPairs[i] = RestTimePair{
-			Start: r.Start,
-			Stop:  r.Stop,
-		}
+		restPairs[i] = RestTimePair(r)
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
@@ -695,10 +692,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	// Update configuration file with all settings
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
-		restConfigPairs[i] = RestTimePairConfig{
-			Start: p.Start,
-			Stop:  p.Stop,
-		}
+		restConfigPairs[i] = RestTimePairConfig(p)
 	}
 
 	if err := UpdateConfigSettings(
@@ -833,8 +827,8 @@ func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
 // Start is when the rest period begins (service stops)
 // Stop is when the rest period ends (service starts)
 type RestTimePair struct {
-	Start string `json:"start"` // When rest begins (service stops)
-	Stop  string `json:"stop"`  // When rest ends (service starts)
+	Start string `yaml:"start" json:"start"` // When rest begins (service stops)
+	Stop  string `yaml:"stop" json:"stop"`   // When rest ends (service starts)
 }
 
 // ScheduleResponse represents the current update schedule.
@@ -958,10 +952,7 @@ func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
 	// Convert RestTimePairConfig to RestTimePair for the response
 	restPairs := make([]RestTimePair, len(cfg.Schedule.Rest))
 	for i, r := range cfg.Schedule.Rest {
-		restPairs[i] = RestTimePair{
-			Start: r.Start,
-			Stop:  r.Stop,
-		}
+		restPairs[i] = RestTimePair(r)
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{
@@ -1073,10 +1064,7 @@ func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 	
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
-		restConfigPairs[i] = RestTimePairConfig{
-			Start: p.Start,
-			Stop:  p.Stop,
-		}
+		restConfigPairs[i] = RestTimePairConfig(p)
 	}
 
 	if err := UpdateConfigSettings(
@@ -1638,12 +1626,12 @@ func writeTimerSchedule(filePath, description, unit string, times []string) erro
 
 	var builder strings.Builder
 	builder.WriteString("[Unit]\n")
-	builder.WriteString(fmt.Sprintf("Description=%s\n\n", sanitizedDescription))
+	fmt.Fprintf(&builder, "Description=%s\n\n", sanitizedDescription)
 	builder.WriteString("[Timer]\n")
 	for _, t := range times {
-		builder.WriteString(fmt.Sprintf("OnCalendar=*-*-* %s:00\n", t))
+		fmt.Fprintf(&builder, "OnCalendar=*-*-* %s:00\n", t)
 	}
-	builder.WriteString(fmt.Sprintf("Unit=%s\n", sanitizedUnit))
+	fmt.Fprintf(&builder, "Unit=%s\n", sanitizedUnit)
 	builder.WriteString("Persistent=true\n\n")
 	builder.WriteString("[Install]\n")
 	builder.WriteString("WantedBy=timers.target\n")
@@ -1684,10 +1672,7 @@ func getRestTimesForMigration() ([]RestTimePairConfig, error) {
 	// Convert from RestTimePair to RestTimePairConfig
 	result := make([]RestTimePairConfig, len(pairs))
 	for i, p := range pairs {
-		result[i] = RestTimePairConfig{
-			Start: p.Start,
-			Stop:  p.Stop,
-		}
+		result[i] = RestTimePairConfig(p)
 	}
 	return result, nil
 }
