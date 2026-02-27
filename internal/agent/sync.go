@@ -63,7 +63,8 @@ var (
 	scheduledSyncCallbackLock sync.RWMutex
 
 	// cronScheduler manages scheduled sync operations
-	cronScheduler *cron.Cron
+	cronScheduler     *cron.Cron
+	cronSchedulerLock sync.Mutex
 )
 
 func init() {
@@ -322,6 +323,11 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	}
 
 	// Garbage collect files not in manifest
+	// Protect playlist file from deletion by adding it to expectedFiles
+	if config.Playlist.Destination != "" {
+		expectedFiles[config.Playlist.Destination] = struct{}{}
+	}
+	
 	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
 		log.Printf("Warning: Garbage collection errors: %v", err)
 	}
@@ -425,10 +431,13 @@ func TriggerSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
+	
+	// Capture context before releasing lock
+	ctx := syncContext
 
 	// Perform sync in background
 	go func() {
-		if err := PerformSync(syncContext); err != nil {
+		if err := PerformSync(ctx); err != nil {
 			log.Printf("Sync error: %v", err)
 		} else if callback != nil {
 			callback()
@@ -456,11 +465,14 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
+	
+	// Capture context before releasing lock
+	ctx := syncContext
 
 	// Perform playlist sync in background
 	go func() {
 		log.Println("Starting playlist-only sync")
-		if err := PerformPlaylistSync(syncContext); err != nil {
+		if err := PerformPlaylistSync(ctx); err != nil {
 			log.Printf("Playlist sync error: %v", err)
 		} else if callback != nil {
 			callback()
@@ -561,7 +573,9 @@ func PerformPlaylistSync(ctx context.Context) error {
 // Schedule is read from config (agent.yaml) - no separate schedule file needed.
 func StartScheduler() error {
 	// Initialize cron scheduler
+	cronSchedulerLock.Lock()
 	cronScheduler = cron.New()
+	cronSchedulerLock.Unlock()
 
 	// Start scheduler goroutine
 	go schedulerLoop()
@@ -577,11 +591,13 @@ func schedulerLoop() {
 	for {
 		config := GetCurrentConfig()
 
-		// Stop existing scheduler
+		// Stop existing scheduler with lock protection
+		cronSchedulerLock.Lock()
 		if cronScheduler != nil {
 			cronScheduler.Stop()
 			cronScheduler = cron.New()
 		}
+		cronSchedulerLock.Unlock()
 
 		// Add scheduled playlist sync tasks (playlist only + restart service)
 		for _, timeStr := range config.Schedule.Playlist {
@@ -592,6 +608,7 @@ func schedulerLoop() {
 				continue
 			}
 			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
+			cronSchedulerLock.Lock()
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
 				log.Printf("Running scheduled playlist sync at %s", timeStr)
 				if err := PerformPlaylistSync(context.Background()); err != nil {
@@ -604,6 +621,7 @@ func schedulerLoop() {
 					}
 				}
 			})
+			cronSchedulerLock.Unlock()
 			if err != nil {
 				log.Printf("Warning: Failed to schedule playlist sync at %s: %v", timeStr, err)
 			}
@@ -618,6 +636,7 @@ func schedulerLoop() {
 				continue
 			}
 			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
+			cronSchedulerLock.Lock()
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
 				log.Printf("Running scheduled video sync at %s", timeStr)
 				if err := PerformSync(context.Background()); err != nil {
@@ -625,13 +644,16 @@ func schedulerLoop() {
 				}
 				// Note: No restart after video sync - only playlist sync restarts service
 			})
+			cronSchedulerLock.Unlock()
 			if err != nil {
 				log.Printf("Warning: Failed to schedule video sync at %s: %v", timeStr, err)
 			}
 		}
 
-		// Start scheduler
+		// Start scheduler with lock protection
+		cronSchedulerLock.Lock()
 		cronScheduler.Start()
+		cronSchedulerLock.Unlock()
 
 		// Wait for reload signal
 		<-syncReloadChan
@@ -655,6 +677,8 @@ func getScheduledSyncCallback() func() {
 
 // StopScheduler stops the sync scheduler.
 func StopScheduler() {
+	cronSchedulerLock.Lock()
+	defer cronSchedulerLock.Unlock()
 	if cronScheduler != nil {
 		cronScheduler.Stop()
 	}

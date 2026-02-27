@@ -159,10 +159,6 @@ schedule:
   rest:
     - start: "22:00"
       stop: "08:00"
-
-# Конфигурация плейлиста
-playlist:
-  destination: "/var/media-pi/playlist.m3u"
 ```
 
 ### Автоматическая синхронизация

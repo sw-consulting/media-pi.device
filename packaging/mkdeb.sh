@@ -197,6 +197,17 @@ if [ ! -d "$MEDIA_DIR" ]; then
     echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."
 fi
 
+# Ensure sync status directory exists
+SYNC_STATUS_DIR="/var/lib/media-pi-agent"
+mkdir -p "$SYNC_STATUS_DIR"
+chown media-pi:media-pi "$SYNC_STATUS_DIR" 2>/dev/null || true
+chmod 755 "$SYNC_STATUS_DIR" 2>/dev/null || true
+
+# Note about systemd sandbox requirements
+echo "Note: media-pi-agent.service is sandboxed with ProtectSystem=strict."
+echo "The service file has been configured with ReadWritePaths for /var/media-pi and /var/lib/media-pi-agent"
+echo "to allow the agent to write media files and sync-status.json."
+
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then
     if [ -z "$2" ]; then
