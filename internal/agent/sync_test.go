@@ -729,6 +729,7 @@ func TestTriggerSync_StopSync(t *testing.T) {
 	// Mock config
 	config := Config{
 		CoreAPIBase: "http://example.com",
+		ServerKey:   "test-device-key",
 		Playlist:    PlaylistConfig{Destination: t.TempDir()},
 	}
 	configMutex.Lock()

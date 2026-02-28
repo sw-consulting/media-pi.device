@@ -455,7 +455,20 @@ func PerformSync(ctx context.Context) error {
 
 // TriggerSync triggers an immediate sync operation.
 // If callback is provided, it will be called after successful sync.
+// Returns an error if prerequisites are not met (e.g., missing configuration).
 func TriggerSync(callback func()) error {
+	// Validate prerequisites before spawning async task
+	config := GetCurrentConfig()
+	if config.CoreAPIBase == "" {
+		return fmt.Errorf("core_api_base not configured")
+	}
+	if config.ServerKey == "" {
+		return fmt.Errorf("server_key not configured")
+	}
+	if config.Playlist.Destination == "" {
+		return fmt.Errorf("playlist destination not configured")
+	}
+
 	syncLock.Lock()
 	defer syncLock.Unlock()
 
@@ -486,7 +499,20 @@ func TriggerSync(callback func()) error {
 
 // TriggerPlaylistSync triggers playlist download and service restart.
 // This downloads only the playlist file (not video files) and restarts the play service.
+// Returns an error if prerequisites are not met (e.g., missing configuration).
 func TriggerPlaylistSync(callback func()) error {
+	// Validate prerequisites before spawning async task
+	config := GetCurrentConfig()
+	if config.CoreAPIBase == "" {
+		return fmt.Errorf("core_api_base not configured")
+	}
+	if config.ServerKey == "" {
+		return fmt.Errorf("server_key not configured")
+	}
+	if config.Playlist.Destination == "" {
+		return fmt.Errorf("playlist destination not configured")
+	}
+
 	syncLock.Lock()
 	defer syncLock.Unlock()
 
