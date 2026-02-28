@@ -610,9 +610,13 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	playlistSource := strings.TrimSpace(req.Playlist.Source)
+	// Source is obsolete but kept for compatibility. Set default if empty.
+	if playlistSource == "" {
+		playlistSource = "media-pi.core server"
+	}
 	playlistDestination := strings.TrimSpace(req.Playlist.Destination)
-	if playlistSource == "" || playlistDestination == "" {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поля source и destination обязательны"})
+	if playlistDestination == "" {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поле destination обязательно"})
 		return
 	}
 

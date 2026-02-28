@@ -526,6 +526,76 @@ func TestHandleConfigurationUploadValidation(t *testing.T) {
 	}
 }
 
+func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /old/src /old/dst"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	// Initialize config
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Destination: "/mnt/usb/playlist.m3u"},
+		Audio:      AudioConfig{Output: "hdmi"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	CrontabWriteFunc = func(string) error { return nil }
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	// Test with empty source - should use default
+	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the service file was written with the default source
+	updatedService, err := os.ReadFile(servicePath)
+	if err != nil {
+		t.Fatalf("failed to read updated service file: %v", err)
+	}
+
+	if !strings.Contains(string(updatedService), "media-pi.core server /mnt/usb/test/") {
+		t.Errorf("expected default source 'media-pi.core server' in service file, got: %s", string(updatedService))
+	}
+}
+
 func TestHandleSystemReloadMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
 

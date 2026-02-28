@@ -34,9 +34,9 @@ type ManifestItem struct {
 }
 
 // Manifest represents the response from /api/devicesync endpoint.
-type Manifest struct {
-	Items []ManifestItem `json:"items"`
-}
+// The backend returns a JSON array of ManifestItem directly (IEnumerable<DeviceSyncManifestItem>),
+// rather than an object with an "items" field.
+type Manifest []ManifestItem
 
 // SyncStatus represents the last sync operation status.
 type SyncStatus struct {
@@ -255,7 +255,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	expectedFiles := make(map[string]struct{})
 
 	// Validate all filenames first to prevent path traversal and build expected files map
-	for _, item := range manifest.Items {
+	for _, item := range *manifest {
 		// Validate filename - prevent path traversal
 		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' {
 			log.Printf("Warning: Invalid filename '%s' for item %d, skipping", item.Filename, item.ID)
@@ -281,7 +281,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 
 	// Download missing or outdated files
 	var downloadErrors []string
-	for _, item := range manifest.Items {
+	for _, item := range *manifest {
 		// Skip invalid filenames (already validated above)
 		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' || strings.Contains(item.Filename, "..") {
 			continue
@@ -380,11 +380,11 @@ func garbageCollect(mediaDir string, expectedFiles map[string]struct{}) error {
 	return nil
 }
 
-// PerformSync performs a complete sync operation.
+// PerformSync performs a video sync operation.
 func PerformSync(ctx context.Context) error {
 	config := GetCurrentConfig()
 
-	log.Println("Starting sync operation")
+	log.Println("Starting video sync")
 	startTime := time.Now()
 
 	manifest, err := fetchManifest(ctx, config)
@@ -397,7 +397,7 @@ func PerformSync(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch manifest: %w", err)
 	}
 
-	log.Printf("Manifest fetched: %d items", len(manifest.Items))
+	log.Printf("Manifest fetched: %d items", len(*manifest))
 
 	if err := syncFiles(ctx, config, manifest); err != nil {
 		setSyncStatus(SyncStatus{
@@ -466,7 +466,7 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Perform playlist sync in background
 	go func() {
-		log.Println("Starting playlist-only sync")
+		log.Println("Starting playlist sync")
 		if err := PerformPlaylistSync(ctx); err != nil {
 			log.Printf("Playlist sync error: %v", err)
 		} else if callback != nil {
@@ -529,8 +529,6 @@ func downloadPlaylist(ctx context.Context, config Config) ([]byte, error) {
 func PerformPlaylistSync(ctx context.Context) error {
 	config := GetCurrentConfig()
 
-	log.Println("Starting playlist sync")
-
 	data, err := downloadPlaylist(ctx, config)
 	if err != nil {
 		return fmt.Errorf("failed to download playlist: %w", err)
@@ -552,6 +550,8 @@ func PerformPlaylistSync(ctx context.Context) error {
 		if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 			return fmt.Errorf("failed to write playlist: %w", err)
 		}
+		// Remove destination file if it exists before rename (atomic replacement)
+		_ = os.Remove(destPath)
 		if err := os.Rename(tmpPath, destPath); err != nil {
 			_ = os.Remove(tmpPath)
 			return fmt.Errorf("failed to rename playlist: %w", err)

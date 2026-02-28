@@ -150,7 +150,7 @@ fi
 
 echo ""
 echo "Setup completed successfully!"
-echo "Media Pi Agent REST service is running on ${DEVICE_IP}:${AGENT_PORT}"
+echo "Media Pi Agent service is running on ${DEVICE_IP}:${AGENT_PORT}"
 echo "Server key: ${SERVER_KEY}"
 echo ""
 echo "API endpoints available:"

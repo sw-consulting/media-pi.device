@@ -103,7 +103,7 @@ func main() {
 	if listenAddr == "" {
 		listenAddr = agent.DefaultListenAddr
 	}
-	log.Printf("Starting Media Pi Agent REST service on %s", listenAddr)
+	log.Printf("Starting Media Pi Agent service on %s", listenAddr)
 
 	server := &http.Server{
 		Addr:         listenAddr,

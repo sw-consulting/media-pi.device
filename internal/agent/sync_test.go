@@ -26,19 +26,17 @@ func TestFetchManifest(t *testing.T) {
 	}{
 		{
 			name: "valid manifest",
-			serverResponse: `{
-				"items": [
-					{"id": 1, "filename": "test.mp4", "fileSizeBytes": 1024, "sha256": "abc123"},
-					{"id": 2, "filename": "sub/test2.mp4", "fileSizeBytes": 2048, "sha256": "def456"}
-				]
-			}`,
+			serverResponse: `[
+				{"id": 1, "filename": "test.mp4", "fileSizeBytes": 1024, "sha256": "abc123"},
+				{"id": 2, "filename": "sub/test2.mp4", "fileSizeBytes": 2048, "sha256": "def456"}
+			]`,
 			statusCode: http.StatusOK,
 			wantErr:    false,
 			wantItems:  2,
 		},
 		{
 			name:           "empty manifest",
-			serverResponse: `{"items": []}`,
+			serverResponse: `[]`,
 			statusCode:     http.StatusOK,
 			wantErr:        false,
 			wantItems:      0,
@@ -79,8 +77,8 @@ func TestFetchManifest(t *testing.T) {
 				return
 			}
 
-			if !tt.wantErr && len(manifest.Items) != tt.wantItems {
-				t.Errorf("fetchManifest() got %d items, want %d", len(manifest.Items), tt.wantItems)
+			if !tt.wantErr && len(*manifest) != tt.wantItems {
+				t.Errorf("fetchManifest() got %d items, want %d", len(*manifest), tt.wantItems)
 			}
 		})
 	}
@@ -96,7 +94,7 @@ func TestFetchManifest_WithAuth(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"items": []}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	defer server.Close()
 
@@ -343,13 +341,11 @@ func TestSyncFiles(t *testing.T) {
 	}
 
 	manifest := &Manifest{
-		Items: []ManifestItem{
-			{
-				ID:            1,
-				Filename:      "file1.txt",
-				FileSizeBytes: int64(len(testContent)),
-				SHA256:        "83bf7fcd913e81d35f0d0e94ed1ec0611e8e3b4909c23b00ef9f076f205e67c6", // SHA256 of "file 1"
-			},
+		{
+			ID:            1,
+			Filename:      "file1.txt",
+			FileSizeBytes: int64(len(testContent)),
+			SHA256:        "83bf7fcd913e81d35f0d0e94ed1ec0611e8e3b4909c23b00ef9f076f205e67c6", // SHA256 of "file 1"
 		},
 	}
 
@@ -390,13 +386,11 @@ func TestSyncFiles_PreventPathTraversal(t *testing.T) {
 			}
 
 			manifest := &Manifest{
-				Items: []ManifestItem{
-					{
-						ID:            1,
-						Filename:      tt.filename,
-						FileSizeBytes: 10,
-						SHA256:        "abc123",
-					},
+				{
+					ID:            1,
+					Filename:      tt.filename,
+					FileSizeBytes: 10,
+					SHA256:        "abc123",
 				},
 			}
 
@@ -437,9 +431,7 @@ func TestSyncFiles_GarbageCollection(t *testing.T) {
 	}
 
 	// Empty manifest - all files should be garbage collected
-	manifest := &Manifest{
-		Items: []ManifestItem{},
-	}
+	manifest := &Manifest{}
 
 	err := syncFiles(context.Background(), config, manifest)
 	if err != nil {
@@ -469,13 +461,11 @@ func TestSyncFiles_GarbageCollectsInvalidFilenames(t *testing.T) {
 
 	// Manifest with invalid filename
 	manifest := &Manifest{
-		Items: []ManifestItem{
-			{
-				ID:            1,
-				Filename:      "../invalid.txt",
-				FileSizeBytes: 10,
-				SHA256:        "abc123",
-			},
+		{
+			ID:            1,
+			Filename:      "../invalid.txt",
+			FileSizeBytes: 10,
+			SHA256:        "abc123",
 		},
 	}
 
@@ -512,19 +502,17 @@ func TestSyncFiles_WithSubdirectories(t *testing.T) {
 	}
 
 	manifest := &Manifest{
-		Items: []ManifestItem{
-			{
-				ID:            1,
-				Filename:      "dir1/file1.txt",
-				FileSizeBytes: 8,
-				SHA256:        "e3b5ad3b4f0f6b8a6c5b1e2f3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
-			},
-			{
-				ID:            2,
-				Filename:      "dir1/dir2/file2.txt",
-				FileSizeBytes: 8,
-				SHA256:        "f4c6be4c5f0f7c9b7d6c2f3e4d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
-			},
+		{
+			ID:            1,
+			Filename:      "dir1/file1.txt",
+			FileSizeBytes: 8,
+			SHA256:        "e3b5ad3b4f0f6b8a6c5b1e2f3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+		},
+		{
+			ID:            2,
+			Filename:      "dir1/dir2/file2.txt",
+			FileSizeBytes: 8,
+			SHA256:        "f4c6be4c5f0f7c9b7d6c2f3e4d5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
 		},
 	}
 
@@ -668,6 +656,27 @@ func TestPerformPlaylistSync(t *testing.T) {
 	if string(content) != "test playlist" {
 		t.Errorf("playlist content = %s, want 'test playlist'", string(content))
 	}
+
+	// Test replacing existing playlist (simulate the "file exists" scenario)
+	// Write an old playlist file first
+	if err := os.WriteFile(destPath, []byte("old playlist"), 0644); err != nil {
+		t.Fatalf("failed to write old playlist: %v", err)
+	}
+
+	// Sync again - should replace the existing file
+	err = PerformPlaylistSync(context.Background())
+	if err != nil {
+		t.Errorf("PerformPlaylistSync() with existing file error = %v", err)
+	}
+
+	// Verify playlist was replaced
+	content, err = os.ReadFile(destPath)
+	if err != nil {
+		t.Errorf("failed to read replaced playlist: %v", err)
+	}
+	if string(content) != "test playlist" {
+		t.Errorf("replaced playlist content = %s, want 'test playlist'", string(content))
+	}
 }
 
 func TestTriggerSync_StopSync(t *testing.T) {
@@ -684,7 +693,7 @@ func TestTriggerSync_StopSync(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(Manifest{Items: []ManifestItem{}})
+		_ = json.NewEncoder(w).Encode(Manifest{})
 	}))
 	defer server.Close()
 
@@ -758,9 +767,7 @@ func TestContextCancellation(t *testing.T) {
 	cancel()
 
 	manifest := &Manifest{
-		Items: []ManifestItem{
-			{ID: 1, Filename: "test.txt", FileSizeBytes: 100, SHA256: "abc"},
-		},
+		{ID: 1, Filename: "test.txt", FileSizeBytes: 100, SHA256: "abc"},
 	}
 
 	err := syncFiles(ctx, config, manifest)
