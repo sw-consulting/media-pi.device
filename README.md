@@ -185,7 +185,7 @@ curl -X POST -H "Authorization: Bearer YOUR_KEY" http://localhost:8081/api/menu/
 
 ### Статус синхронизации
 
-Статус последней синхронизации сохраняется в памяти и опционально в файле `/var/lib/media-pi-agent/sync-status.json`:
+Статус последней синхронизации сохраняется в памяти и опционально в файле `/var/media-pi/sync/sync-status.json`:
 
 ```json
 {

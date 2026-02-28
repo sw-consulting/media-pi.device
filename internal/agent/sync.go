@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	syncStatusFilePath = "/var/lib/media-pi-agent/sync-status.json"
+	syncStatusFilePath = "/var/media-pi/sync/sync-status.json"
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -327,7 +327,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	if config.Playlist.Destination != "" {
 		expectedFiles[config.Playlist.Destination] = struct{}{}
 	}
-	
+
 	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
 		log.Printf("Warning: Garbage collection errors: %v", err)
 	}
@@ -431,7 +431,7 @@ func TriggerSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
-	
+
 	// Capture context before releasing lock
 	ctx := syncContext
 
@@ -465,7 +465,7 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
-	
+
 	// Capture context before releasing lock
 	ctx := syncContext
 
