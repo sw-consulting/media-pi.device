@@ -34,9 +34,9 @@ type ManifestItem struct {
 }
 
 // Manifest represents the response from /api/devicesync endpoint.
-type Manifest struct {
-	Items []ManifestItem `json:"items"`
-}
+// The backend returns a JSON array of ManifestItem directly (IEnumerable<DeviceSyncManifestItem>),
+// rather than an object with an "items" field.
+type Manifest []ManifestItem
 
 // SyncStatus represents the last sync operation status.
 type SyncStatus struct {
@@ -255,7 +255,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	expectedFiles := make(map[string]struct{})
 
 	// Validate all filenames first to prevent path traversal and build expected files map
-	for _, item := range manifest.Items {
+	for _, item := range *manifest {
 		// Validate filename - prevent path traversal
 		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' {
 			log.Printf("Warning: Invalid filename '%s' for item %d, skipping", item.Filename, item.ID)
@@ -281,7 +281,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 
 	// Download missing or outdated files
 	var downloadErrors []string
-	for _, item := range manifest.Items {
+	for _, item := range *manifest {
 		// Skip invalid filenames (already validated above)
 		if item.Filename == "" || item.Filename[0] == '/' || item.Filename[0] == '\\' || strings.Contains(item.Filename, "..") {
 			continue
@@ -397,7 +397,7 @@ func PerformSync(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch manifest: %w", err)
 	}
 
-	log.Printf("Manifest fetched: %d items", len(manifest.Items))
+	log.Printf("Manifest fetched: %d items", len(*manifest))
 
 	if err := syncFiles(ctx, config, manifest); err != nil {
 		setSyncStatus(SyncStatus{
