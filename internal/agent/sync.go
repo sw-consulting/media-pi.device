@@ -447,11 +447,6 @@ func TriggerSync(callback func()) error {
 	return nil
 }
 
-// TriggerSyncWithCallback is an alias for TriggerSync for compatibility.
-func TriggerSyncWithCallback(callback func()) error {
-	return TriggerSync(callback)
-}
-
 // TriggerPlaylistSync triggers playlist download and service restart.
 // This downloads only the playlist file (not video files) and restarts the play service.
 func TriggerPlaylistSync(callback func()) error {
@@ -673,15 +668,6 @@ func getScheduledSyncCallback() func() {
 	scheduledSyncCallbackLock.RLock()
 	defer scheduledSyncCallbackLock.RUnlock()
 	return scheduledSyncCallback
-}
-
-// StopScheduler stops the sync scheduler.
-func StopScheduler() {
-	cronSchedulerLock.Lock()
-	defer cronSchedulerLock.Unlock()
-	if cronScheduler != nil {
-		cronScheduler.Stop()
-	}
 }
 
 // SignalSchedulerReload signals the scheduler to reload its configuration.

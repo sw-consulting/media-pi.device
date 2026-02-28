@@ -99,9 +99,6 @@ sudo systemctl status media-pi-agent
 - `PUT /api/menu/configuration/update` — обновить конфигурацию
 
 ### Системные операции
-- `GET /api/menu/storage/check` — проверка Яндекс.Диска
-- `GET /api/menu/audio/get` — получить текущие настройки аудио
-- `PUT /api/menu/audio/update` — обновить настройки аудио (выбор HDMI или 3.5mm Jack)
 - `GET /api/menu/service/status` — получить статус сервисов
 - `POST /api/menu/system/reload` — применить изменения (daemon-reload)
 - `POST /api/menu/system/reboot` — перезагрузка системы
