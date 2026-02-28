@@ -817,7 +817,7 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	// Trigger playlist-only sync with callback to restart play.video.service
 	err := TriggerPlaylistSync(func() {
 		log.Println("Playlist sync completed, restarting play.video.service")
-		if err := restartVideoPlayService(); err != nil {
+		if err := RestartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart play.video.service: %v", err)
 		}
 	})
@@ -920,8 +920,9 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// restartVideoPlayService restarts the play.video.service via systemd.
-func restartVideoPlayService() error {
+// RestartVideoPlayService restarts the play.video.service via D-Bus.
+// This function waits for the restart operation to complete and verifies the result.
+func RestartVideoPlayService() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -947,13 +948,6 @@ func restartVideoPlayService() error {
 	case <-ctx.Done():
 		return fmt.Errorf("restart timeout")
 	}
-}
-
-// RestartVideoPlayServiceSimple restarts the play.video.service using systemctl command.
-// This is a simpler version that can be exported and used from main.
-func RestartVideoPlayServiceSimple() error {
-	cmd := exec.Command("systemctl", "restart", "play.video.service")
-	return cmd.Run()
 }
 
 func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
