@@ -240,8 +240,8 @@ func verifyLocalFile(path string, item ManifestItem) (bool, error) {
 
 // syncFiles synchronizes files from the manifest to the local media directory.
 func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
-	// Get media directory from playlist destination
-	mediaDir := filepath.Dir(config.Playlist.Destination)
+	// Get media directory from playlist destination (destination is a folder)
+	mediaDir := config.Playlist.Destination
 	if mediaDir == "" || mediaDir == "." {
 		mediaDir = "/var/media-pi"
 	}
@@ -325,7 +325,8 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	// Garbage collect files not in manifest
 	// Protect playlist file from deletion by adding it to expectedFiles
 	if config.Playlist.Destination != "" {
-		expectedFiles[config.Playlist.Destination] = struct{}{}
+		playlistPath := filepath.Join(config.Playlist.Destination, "playlist.m3u")
+		expectedFiles[playlistPath] = struct{}{}
 	}
 
 	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
@@ -539,10 +540,10 @@ func PerformPlaylistSync(ctx context.Context) error {
 		return nil
 	}
 
-	// Save playlist to destination
+	// Save playlist to destination (destination is a folder, append filename)
 	if config.Playlist.Destination != "" {
-		destPath := config.Playlist.Destination
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		destPath := filepath.Join(config.Playlist.Destination, "playlist.m3u")
+		if err := os.MkdirAll(config.Playlist.Destination, 0755); err != nil {
 			return fmt.Errorf("failed to create playlist directory: %w", err)
 		}
 

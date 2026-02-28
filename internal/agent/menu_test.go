@@ -557,7 +557,7 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	config := Config{
 		ServerKey:  "test-key",
 		ListenAddr: "0.0.0.0:8081",
-		Playlist:   PlaylistConfig{Destination: "/mnt/usb/playlist.m3u"},
+		Playlist:   PlaylistConfig{Destination: "/mnt/usb"},
 		Audio:      AudioConfig{Output: "hdmi"},
 	}
 	configMutex.Lock()

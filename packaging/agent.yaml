@@ -24,4 +24,4 @@ max_parallel_downloads: 3
 
 # Playlist configuration
 playlist:
-  destination: "/var/media-pi/playlist.m3u"
+  destination: "/var/media-pi"
