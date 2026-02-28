@@ -386,8 +386,7 @@ func ReloadConfig() error {
 // configuration reload. It accepts POST requests and returns 204 on
 // success.
 func HandleReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "method not allowed"})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -510,14 +509,24 @@ func JSONResponse(w http.ResponseWriter, status int, response APIResponse) {
 	}
 }
 
-// HandleListUnits returns state for all allowed units as JSON. It requires
-// a GET request and authentication.
-func HandleListUnits(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+// requireMethod checks if the request method matches the expected method.
+// If not, it writes a 405 Method Not Allowed response and returns false.
+// Usage: if !requireMethod(w, r, http.MethodGet) { return }
+func requireMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method != method {
 		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
 			OK:     false,
 			ErrMsg: "Метод не разрешён",
 		})
+		return false
+	}
+	return true
+}
+
+// HandleListUnits returns state for all allowed units as JSON. It requires
+// a GET request and authentication.
+func HandleListUnits(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -557,11 +566,7 @@ func HandleListUnits(w http.ResponseWriter, r *http.Request) {
 // HandleUnitStatus returns state for a single allowed unit. It requires a
 // GET request and the "unit" query parameter.
 func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -619,11 +624,7 @@ func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
 // request body.
 func HandleUnitAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-				OK:     false,
-				ErrMsg: "Метод запрещён",
-			})
+		if !requireMethod(w, r, http.MethodPost) {
 			return
 		}
 
@@ -726,11 +727,7 @@ func HandleUnitAction(action string) http.HandlerFunc {
 // HandleHealth provides a simple healthcheck endpoint with version and
 // timestamp information.
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 

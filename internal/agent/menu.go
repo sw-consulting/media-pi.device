@@ -219,11 +219,7 @@ type ServiceStatusResponse struct {
 
 // HandleMenuList returns the list of available menu actions.
 func HandleMenuList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -237,11 +233,7 @@ func HandleMenuList(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaybackStop stops the video playback service.
 func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -292,11 +284,7 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaybackStart starts the video playback service.
 func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -400,8 +388,7 @@ func isPathMounted(path string) bool {
 // HandleServiceStatus returns statuses for playback, playlist upload services
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -581,8 +568,7 @@ func writeAudioSettings(output string) error {
 
 // HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
 func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -613,8 +599,7 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 
 // HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
 func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodPut) {
 		return
 	}
 
@@ -712,11 +697,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemReload reloads systemd daemon configuration.
 func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -754,11 +735,7 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemReboot reboots the system.
 func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -791,11 +768,7 @@ func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemShutdown shuts down the system.
 func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -837,11 +810,7 @@ type RestTimePair struct {
 // HandlePlaylistStartUpload triggers playlist sync (replaces old systemd upload service).
 // This downloads only the playlist file (not video files) and restarts the play service.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -874,11 +843,7 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaylistStopUpload stops ongoing playlist sync (replaces old systemd upload service).
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -904,11 +869,7 @@ func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandleVideoStartUpload triggers video sync (replaces old systemd upload service).
 func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -935,11 +896,7 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandleVideoStopUpload stops ongoing video sync (replaces old systemd upload service).
 func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
