@@ -1270,13 +1270,13 @@ func buildRestCronEntries(pairs []RestTimePair) ([]string, error) {
 		// Parse rest start time (when service should stop)
 		startHour, startMinute, err := parseTimeValue(pair.Start)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка в времени начала отдыха: %v", err)
+			return nil, fmt.Errorf("ошибка в значении начала нерабочего времени: %v", err)
 		}
 
 		// Parse rest stop time (when service should start)
 		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка в времени окончания отдыха: %v", err)
+			return nil, fmt.Errorf("ошибка в значении окончания нерабочего времени: %v", err)
 		}
 
 		if idx > 0 {
