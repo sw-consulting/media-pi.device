@@ -65,9 +65,9 @@ func main() {
 	// Set callback to restart play.video service after scheduled playlist syncs
 	agent.SetScheduledSyncCallback(func() {
 		log.Println("Scheduled sync completed, restarting play.video service")
-		// Use a simple systemctl restart command for scheduled syncs
+		// Use D-Bus to restart the service with proper result checking
 		// This is a best-effort operation, log errors but don't fail
-		if err := agent.RestartVideoPlayServiceSimple(); err != nil {
+		if err := agent.RestartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart play.video service after scheduled sync: %v", err)
 		}
 	})

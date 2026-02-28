@@ -219,11 +219,7 @@ type ServiceStatusResponse struct {
 
 // HandleMenuList returns the list of available menu actions.
 func HandleMenuList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -237,11 +233,7 @@ func HandleMenuList(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaybackStop stops the video playback service.
 func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -292,11 +284,7 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaybackStart starts the video playback service.
 func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -400,8 +388,7 @@ func isPathMounted(path string) bool {
 // HandleServiceStatus returns statuses for playback, playlist upload services
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -581,8 +568,7 @@ func writeAudioSettings(output string) error {
 
 // HandleConfigurationGet aggregates playlist, schedule and audio configuration into a single response.
 func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -613,8 +599,7 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 
 // HandleConfigurationUpdate updates playlist upload paths, schedule timers and audio output together.
 func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{OK: false, ErrMsg: "Метод не разрешён"})
+	if !requireMethod(w, r, http.MethodPut) {
 		return
 	}
 
@@ -712,11 +697,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemReload reloads systemd daemon configuration.
 func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -754,11 +735,7 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemReboot reboots the system.
 func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -791,11 +768,7 @@ func HandleSystemReboot(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemShutdown shuts down the system.
 func HandleSystemShutdown(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -834,35 +807,17 @@ type RestTimePair struct {
 	Stop  string `yaml:"stop" json:"stop"`   // When rest ends (service starts)
 }
 
-// ScheduleResponse represents the current update schedule.
-type ScheduleResponse struct {
-	Playlist []string       `json:"playlist"`
-	Video    []string       `json:"video"`
-	Rest     []RestTimePair `json:"rest,omitempty"`
-}
-
-// ScheduleUpdateRequest represents the request to update timers for playlist and video uploads.
-type ScheduleUpdateRequest struct {
-	Playlist []string        `json:"playlist"`
-	Video    []string        `json:"video"`
-	Rest     *[]RestTimePair `json:"rest"`
-}
-
 // HandlePlaylistStartUpload triggers playlist sync (replaces old systemd upload service).
 // This downloads only the playlist file (not video files) and restarts the play service.
 func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
 	// Trigger playlist-only sync with callback to restart play.video.service
 	err := TriggerPlaylistSync(func() {
 		log.Println("Playlist sync completed, restarting play.video.service")
-		if err := restartVideoPlayService(); err != nil {
+		if err := RestartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart play.video.service: %v", err)
 		}
 	})
@@ -888,11 +843,7 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandlePlaylistStopUpload stops ongoing playlist sync (replaces old systemd upload service).
 func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -918,11 +869,7 @@ func HandlePlaylistStopUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandleVideoStartUpload triggers video sync (replaces old systemd upload service).
 func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -949,11 +896,7 @@ func HandleVideoStartUpload(w http.ResponseWriter, r *http.Request) {
 
 // HandleVideoStopUpload stops ongoing video sync (replaces old systemd upload service).
 func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Требуется метод POST",
-		})
+	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -977,8 +920,9 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// restartVideoPlayService restarts the play.video.service via systemd.
-func restartVideoPlayService() error {
+// RestartVideoPlayService restarts the play.video.service via D-Bus.
+// This function waits for the restart operation to complete and verifies the result.
+func RestartVideoPlayService() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -1004,172 +948,6 @@ func restartVideoPlayService() error {
 	case <-ctx.Done():
 		return fmt.Errorf("restart timeout")
 	}
-}
-
-// RestartVideoPlayServiceSimple restarts the play.video.service using systemctl command.
-// This is a simpler version that can be exported and used from main.
-func RestartVideoPlayServiceSimple() error {
-	cmd := exec.Command("systemctl", "restart", "play.video.service")
-	return cmd.Run()
-}
-
-// HandleScheduleGet returns the configured update timers for playlist and video uploads.
-func HandleScheduleGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	// Read schedule from agent.yaml instead of systemd files
-	cfg := GetCurrentConfig()
-
-	// Convert RestTimePairConfig to RestTimePair for the response
-	restPairs := make([]RestTimePair, len(cfg.Schedule.Rest))
-	for i, r := range cfg.Schedule.Rest {
-		restPairs[i] = RestTimePair(r)
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: ScheduleResponse{
-			Playlist: cfg.Schedule.Playlist,
-			Video:    cfg.Schedule.Video,
-			Rest:     restPairs,
-		},
-	})
-}
-
-// HandleScheduleUpdate updates the playlist and video timer configurations.
-func HandleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		JSONResponse(w, http.StatusMethodNotAllowed, APIResponse{
-			OK:     false,
-			ErrMsg: "Метод не разрешён",
-		})
-		return
-	}
-
-	var req ScheduleUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный JSON в теле запроса",
-		})
-		return
-	}
-
-	if hasInvalidTimes(req.Playlist, req.Video) {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{
-			OK:     false,
-			ErrMsg: "Неверный формат времени. Используйте HH:MM",
-		})
-		return
-	}
-
-	var restPairs []RestTimePair
-	if req.Rest != nil {
-		pairs, err := sanitizeRestPairs(*req.Rest)
-		if err != nil {
-			JSONResponse(w, http.StatusBadRequest, APIResponse{
-				OK:     false,
-				ErrMsg: err.Error(),
-			})
-			return
-		}
-
-		if err := validateRestTimePairs(pairs); err != nil {
-			JSONResponse(w, http.StatusBadRequest, APIResponse{
-				OK:     false,
-				ErrMsg: err.Error(),
-			})
-			return
-		}
-
-		restPairs = pairs
-	}
-
-	normalizedPlaylist, err := normalizeTimes(req.Playlist)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время плейлиста: %v", err),
-		})
-		return
-	}
-
-	normalizedVideo, err := normalizeTimes(req.Video)
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось обработать время видео: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(PlaylistTimerPath, "Playlist upload timer", "playlist.upload.service", normalizedPlaylist); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера плейлиста: %v", err),
-		})
-		return
-	}
-
-	if err := writeTimerSchedule(VideoTimerPath, "Video upload timer", "video.upload.service", normalizedVideo); err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось записать файл таймера видео: %v", err),
-		})
-		return
-	}
-
-	if req.Rest != nil {
-		if err := updateRestTimes(restPairs); err != nil {
-			JSONResponse(w, http.StatusInternalServerError, APIResponse{
-				OK:     false,
-				ErrMsg: fmt.Sprintf("Не удалось обновить crontab: %v", err),
-			})
-			return
-		}
-	}
-
-	// Update configuration file with schedule settings
-	// Note: We log but don't fail on config file update errors during migration period.
-	// Systemd files remain the operational source of truth, and YAML file is being
-	// introduced as the new configuration store. On next agent restart, the YAML will
-	// be populated via migration if still missing.
-	cfg := GetCurrentConfig()
-
-	// Preserve existing rest configuration if not provided in request
-	var restConfigPairs []RestTimePairConfig
-	if req.Rest != nil {
-		restConfigPairs = make([]RestTimePairConfig, len(restPairs))
-		for i, p := range restPairs {
-			restConfigPairs[i] = RestTimePairConfig(p)
-		}
-	} else {
-		// Keep existing rest configuration when not provided
-		restConfigPairs = cfg.Schedule.Rest
-	}
-
-	if err := UpdateConfigSettings(
-		cfg.Playlist, // Keep existing playlist config
-		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
-		cfg.Audio, // Keep existing audio config
-	); err != nil {
-		log.Printf("Warning: Failed to update config file: %v", err)
-	}
-
-	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: MenuActionResponse{
-			Action:  "schedule-update",
-			Result:  "success",
-			Message: "Расписание обновлено",
-		},
-	})
 }
 
 func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
@@ -1443,13 +1221,13 @@ func buildRestCronEntries(pairs []RestTimePair) ([]string, error) {
 		// Parse rest start time (when service should stop)
 		startHour, startMinute, err := parseTimeValue(pair.Start)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка в времени начала отдыха: %v", err)
+			return nil, fmt.Errorf("ошибка в значении начала нерабочего времени: %v", err)
 		}
 
 		// Parse rest stop time (when service should start)
 		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка в времени окончания отдыха: %v", err)
+			return nil, fmt.Errorf("ошибка в значении окончания нерабочего времени: %v", err)
 		}
 
 		if idx > 0 {

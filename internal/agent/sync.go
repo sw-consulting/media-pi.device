@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	syncStatusFilePath = "/var/lib/media-pi-agent/sync-status.json"
+	syncStatusFilePath = "/var/media-pi/sync/sync-status.json"
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -327,7 +327,7 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	if config.Playlist.Destination != "" {
 		expectedFiles[config.Playlist.Destination] = struct{}{}
 	}
-	
+
 	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
 		log.Printf("Warning: Garbage collection errors: %v", err)
 	}
@@ -431,7 +431,7 @@ func TriggerSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
-	
+
 	// Capture context before releasing lock
 	ctx := syncContext
 
@@ -447,11 +447,6 @@ func TriggerSync(callback func()) error {
 	return nil
 }
 
-// TriggerSyncWithCallback is an alias for TriggerSync for compatibility.
-func TriggerSyncWithCallback(callback func()) error {
-	return TriggerSync(callback)
-}
-
 // TriggerPlaylistSync triggers playlist download and service restart.
 // This downloads only the playlist file (not video files) and restarts the play service.
 func TriggerPlaylistSync(callback func()) error {
@@ -465,7 +460,7 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Create new context
 	syncContext, syncCancel = context.WithCancel(context.Background())
-	
+
 	// Capture context before releasing lock
 	ctx := syncContext
 
@@ -611,14 +606,11 @@ func schedulerLoop() {
 			cronSchedulerLock.Lock()
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
 				log.Printf("Running scheduled playlist sync at %s", timeStr)
-				if err := PerformPlaylistSync(context.Background()); err != nil {
-					log.Printf("Scheduled playlist sync error: %v", err)
-				} else {
-					// Restart play service after successful playlist sync
-					callback := getScheduledSyncCallback()
-					if callback != nil {
-						callback()
-					}
+
+				// Route through shared sync trigger to serialize with manual sync operations.
+				callback := getScheduledSyncCallback()
+				if err := TriggerPlaylistSync(callback); err != nil {
+					log.Printf("Failed to trigger scheduled playlist sync: %v", err)
 				}
 			})
 			cronSchedulerLock.Unlock()
@@ -639,8 +631,10 @@ func schedulerLoop() {
 			cronSchedulerLock.Lock()
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
 				log.Printf("Running scheduled video sync at %s", timeStr)
-				if err := PerformSync(context.Background()); err != nil {
-					log.Printf("Scheduled video sync error: %v", err)
+
+				// Route through shared sync trigger to serialize with other sync operations.
+				if err := TriggerSync(nil); err != nil {
+					log.Printf("Failed to trigger scheduled video sync: %v", err)
 				}
 				// Note: No restart after video sync - only playlist sync restarts service
 			})
@@ -675,19 +669,8 @@ func getScheduledSyncCallback() func() {
 	return scheduledSyncCallback
 }
 
-// StopScheduler stops the sync scheduler.
-func StopScheduler() {
-	cronSchedulerLock.Lock()
-	defer cronSchedulerLock.Unlock()
-	if cronScheduler != nil {
-		cronScheduler.Stop()
-	}
-}
-
 // SignalSchedulerReload signals the scheduler to reload its configuration.
 func SignalSchedulerReload() {
-	syncLock.Lock()
-	defer syncLock.Unlock()
 	select {
 	case syncReloadChan <- struct{}{}:
 	default:

@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -763,7 +764,7 @@ func TestContextCancellation(t *testing.T) {
 	}
 
 	err := syncFiles(ctx, config, manifest)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("syncFiles() should return context.Canceled, got: %v", err)
 	}
 }
