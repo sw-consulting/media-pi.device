@@ -385,7 +385,7 @@ func isPathMounted(path string) bool {
 	return false
 }
 
-// HandleServiceStatus returns statuses for playback, playlist upload services
+// HandleServiceStatus returns statuses for playback, internal sync processes
 // and whether the Yandex disk mount point is mounted.
 func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
@@ -416,8 +416,8 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 	resp := ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
-		PlaylistUploadServiceStatus: checkUnit("playlist.upload.service"),
-		VideoUploadServiceStatus:    checkUnit("video.upload.service"),
+		PlaylistUploadServiceStatus: IsPlaylistSyncRunning(),
+		VideoUploadServiceStatus:    IsVideoSyncRunning(),
 		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
 	}
 

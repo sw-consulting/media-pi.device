@@ -65,6 +65,12 @@ var (
 	// cronScheduler manages scheduled sync operations
 	cronScheduler     *cron.Cron
 	cronSchedulerLock sync.Mutex
+
+	// Tracking for running sync processes
+	videoSyncRunning        bool
+	videoSyncRunningLock    sync.RWMutex
+	playlistSyncRunning     bool
+	playlistSyncRunningLock sync.RWMutex
 )
 
 func init() {
@@ -77,6 +83,34 @@ func GetSyncStatus() SyncStatus {
 	syncStatusLock.RLock()
 	defer syncStatusLock.RUnlock()
 	return syncStatus
+}
+
+// IsVideoSyncRunning returns whether video sync is currently running.
+func IsVideoSyncRunning() bool {
+	videoSyncRunningLock.RLock()
+	defer videoSyncRunningLock.RUnlock()
+	return videoSyncRunning
+}
+
+// IsPlaylistSyncRunning returns whether playlist sync is currently running.
+func IsPlaylistSyncRunning() bool {
+	playlistSyncRunningLock.RLock()
+	defer playlistSyncRunningLock.RUnlock()
+	return playlistSyncRunning
+}
+
+// setVideoSyncRunning sets the video sync running state.
+func setVideoSyncRunning(running bool) {
+	videoSyncRunningLock.Lock()
+	videoSyncRunning = running
+	videoSyncRunningLock.Unlock()
+}
+
+// setPlaylistSyncRunning sets the playlist sync running state.
+func setPlaylistSyncRunning(running bool) {
+	playlistSyncRunningLock.Lock()
+	playlistSyncRunning = running
+	playlistSyncRunningLock.Unlock()
 }
 
 // setSyncStatus updates the sync status in memory and optionally persists to file.
@@ -240,8 +274,8 @@ func verifyLocalFile(path string, item ManifestItem) (bool, error) {
 
 // syncFiles synchronizes files from the manifest to the local media directory.
 func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
-	// Get media directory from playlist destination
-	mediaDir := filepath.Dir(config.Playlist.Destination)
+	// Get media directory from playlist destination (destination is a folder)
+	mediaDir := config.Playlist.Destination
 	if mediaDir == "" || mediaDir == "." {
 		mediaDir = "/var/media-pi"
 	}
@@ -325,7 +359,8 @@ func syncFiles(ctx context.Context, config Config, manifest *Manifest) error {
 	// Garbage collect files not in manifest
 	// Protect playlist file from deletion by adding it to expectedFiles
 	if config.Playlist.Destination != "" {
-		expectedFiles[config.Playlist.Destination] = struct{}{}
+		playlistPath := filepath.Join(config.Playlist.Destination, "playlist.m3u")
+		expectedFiles[playlistPath] = struct{}{}
 	}
 
 	if err := garbageCollect(mediaDir, expectedFiles); err != nil {
@@ -420,7 +455,20 @@ func PerformSync(ctx context.Context) error {
 
 // TriggerSync triggers an immediate sync operation.
 // If callback is provided, it will be called after successful sync.
+// Returns an error if prerequisites are not met (e.g., missing configuration).
 func TriggerSync(callback func()) error {
+	// Validate prerequisites before spawning async task
+	config := GetCurrentConfig()
+	if config.CoreAPIBase == "" {
+		return fmt.Errorf("core_api_base not configured")
+	}
+	if config.ServerKey == "" {
+		return fmt.Errorf("server_key not configured")
+	}
+	if config.Playlist.Destination == "" {
+		return fmt.Errorf("playlist destination not configured")
+	}
+
 	syncLock.Lock()
 	defer syncLock.Unlock()
 
@@ -437,6 +485,8 @@ func TriggerSync(callback func()) error {
 
 	// Perform sync in background
 	go func() {
+		setVideoSyncRunning(true)
+		defer setVideoSyncRunning(false)
 		if err := PerformSync(ctx); err != nil {
 			log.Printf("Sync error: %v", err)
 		} else if callback != nil {
@@ -449,7 +499,20 @@ func TriggerSync(callback func()) error {
 
 // TriggerPlaylistSync triggers playlist download and service restart.
 // This downloads only the playlist file (not video files) and restarts the play service.
+// Returns an error if prerequisites are not met (e.g., missing configuration).
 func TriggerPlaylistSync(callback func()) error {
+	// Validate prerequisites before spawning async task
+	config := GetCurrentConfig()
+	if config.CoreAPIBase == "" {
+		return fmt.Errorf("core_api_base not configured")
+	}
+	if config.ServerKey == "" {
+		return fmt.Errorf("server_key not configured")
+	}
+	if config.Playlist.Destination == "" {
+		return fmt.Errorf("playlist destination not configured")
+	}
+
 	syncLock.Lock()
 	defer syncLock.Unlock()
 
@@ -466,6 +529,8 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Perform playlist sync in background
 	go func() {
+		setPlaylistSyncRunning(true)
+		defer setPlaylistSyncRunning(false)
 		log.Println("Starting playlist sync")
 		if err := PerformPlaylistSync(ctx); err != nil {
 			log.Printf("Playlist sync error: %v", err)
@@ -539,10 +604,10 @@ func PerformPlaylistSync(ctx context.Context) error {
 		return nil
 	}
 
-	// Save playlist to destination
+	// Save playlist to destination (destination is a folder, append filename)
 	if config.Playlist.Destination != "" {
-		destPath := config.Playlist.Destination
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		destPath := filepath.Join(config.Playlist.Destination, "playlist.m3u")
+		if err := os.MkdirAll(config.Playlist.Destination, 0755); err != nil {
 			return fmt.Errorf("failed to create playlist directory: %w", err)
 		}
 

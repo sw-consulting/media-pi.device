@@ -155,7 +155,7 @@ func DefaultConfig() Config {
 		CoreAPIBase:          "https://vezyn.fvds.ru",
 		MaxParallelDownloads: 3,
 		Playlist: PlaylistConfig{
-			Destination: "/var/media-pi/playlist.m3u",
+			Destination: "/var/media-pi",
 		},
 	}
 }
@@ -190,7 +190,7 @@ func LoadConfigFrom(path string) (*Config, error) {
 
 	// Set default playlist destination if not specified
 	if c.Playlist.Destination == "" {
-		c.Playlist.Destination = "/var/media-pi/playlist.m3u"
+		c.Playlist.Destination = "/var/media-pi"
 	}
 
 	// Set default core API base if not specified

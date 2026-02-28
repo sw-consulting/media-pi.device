@@ -337,7 +337,7 @@ func TestSyncFiles(t *testing.T) {
 	config := Config{
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-key",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.m3u")},
+		Playlist:    PlaylistConfig{Destination: tmpDir},
 	}
 
 	manifest := &Manifest{
@@ -382,7 +382,7 @@ func TestSyncFiles_PreventPathTraversal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := Config{
 				CoreAPIBase: "http://example.com",
-				Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.m3u")},
+				Playlist:    PlaylistConfig{Destination: tmpDir},
 			}
 
 			manifest := &Manifest{
@@ -427,7 +427,7 @@ func TestSyncFiles_GarbageCollection(t *testing.T) {
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.m3u")},
+		Playlist:    PlaylistConfig{Destination: tmpDir},
 	}
 
 	// Empty manifest - all files should be garbage collected
@@ -456,7 +456,7 @@ func TestSyncFiles_GarbageCollectsInvalidFilenames(t *testing.T) {
 
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.m3u")},
+		Playlist:    PlaylistConfig{Destination: tmpDir},
 	}
 
 	// Manifest with invalid filename
@@ -498,7 +498,7 @@ func TestSyncFiles_WithSubdirectories(t *testing.T) {
 	config := Config{
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-key",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(tmpDir, "playlist.m3u")},
+		Playlist:    PlaylistConfig{Destination: tmpDir},
 	}
 
 	manifest := &Manifest{
@@ -628,13 +628,12 @@ func TestPerformPlaylistSync(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Test with destination set
-	destPath := filepath.Join(tmpDir, "playlist.txt")
+	// Test with destination set (destination is a folder)
 	config := Config{
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-key",
 		Playlist: PlaylistConfig{
-			Destination: destPath,
+			Destination: tmpDir,
 		},
 	}
 
@@ -648,8 +647,9 @@ func TestPerformPlaylistSync(t *testing.T) {
 		t.Errorf("PerformPlaylistSync() error = %v", err)
 	}
 
-	// Verify playlist was saved
-	content, err := os.ReadFile(destPath)
+	// Verify playlist was saved (should be saved as playlist.m3u in the destination folder)
+	playlistPath := filepath.Join(tmpDir, "playlist.m3u")
+	content, err := os.ReadFile(playlistPath)
 	if err != nil {
 		t.Errorf("failed to read playlist: %v", err)
 	}
@@ -659,7 +659,7 @@ func TestPerformPlaylistSync(t *testing.T) {
 
 	// Test replacing existing playlist (simulate the "file exists" scenario)
 	// Write an old playlist file first
-	if err := os.WriteFile(destPath, []byte("old playlist"), 0644); err != nil {
+	if err := os.WriteFile(playlistPath, []byte("old playlist"), 0644); err != nil {
 		t.Fatalf("failed to write old playlist: %v", err)
 	}
 
@@ -670,7 +670,7 @@ func TestPerformPlaylistSync(t *testing.T) {
 	}
 
 	// Verify playlist was replaced
-	content, err = os.ReadFile(destPath)
+	content, err = os.ReadFile(playlistPath)
 	if err != nil {
 		t.Errorf("failed to read replaced playlist: %v", err)
 	}
@@ -679,11 +679,58 @@ func TestPerformPlaylistSync(t *testing.T) {
 	}
 }
 
+func TestPlaylistFilenameIsAlwaysPlaylistM3u(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("#EXTM3U\ntest.mp4"))
+	}))
+	defer server.Close()
+
+	// Test that regardless of what destination folder is used, the playlist is always saved as "playlist.m3u"
+	config := Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-key",
+		Playlist: PlaylistConfig{
+			Destination: tmpDir, // Just a folder, not a file path
+		},
+	}
+
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	err := PerformPlaylistSync(context.Background())
+	if err != nil {
+		t.Fatalf("PerformPlaylistSync() error = %v", err)
+	}
+
+	// Verify the playlist file is named exactly "playlist.m3u"
+	playlistPath := filepath.Join(tmpDir, "playlist.m3u")
+	if _, err := os.Stat(playlistPath); os.IsNotExist(err) {
+		t.Errorf("playlist file should be named 'playlist.m3u', but file not found at %s", playlistPath)
+	}
+
+	// Verify no other files were created
+	files, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read directory: %v", err)
+	}
+	if len(files) != 1 {
+		t.Errorf("expected exactly 1 file, got %d", len(files))
+	}
+	if len(files) > 0 && files[0].Name() != "playlist.m3u" {
+		t.Errorf("expected file named 'playlist.m3u', got '%s'", files[0].Name())
+	}
+}
+
 func TestTriggerSync_StopSync(t *testing.T) {
 	// Mock config
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(t.TempDir(), "playlist.m3u")},
+		ServerKey:   "test-device-key",
+		Playlist:    PlaylistConfig{Destination: t.TempDir()},
 	}
 	configMutex.Lock()
 	currentConfig = &config
@@ -759,7 +806,7 @@ func TestGarbageCollect(t *testing.T) {
 func TestContextCancellation(t *testing.T) {
 	config := Config{
 		CoreAPIBase: "http://example.com",
-		Playlist:    PlaylistConfig{Destination: filepath.Join(t.TempDir(), "playlist.m3u")},
+		Playlist:    PlaylistConfig{Destination: t.TempDir()},
 	}
 
 	// Create context that's already cancelled
