@@ -672,8 +672,6 @@ func getScheduledSyncCallback() func() {
 
 // SignalSchedulerReload signals the scheduler to reload its configuration.
 func SignalSchedulerReload() {
-	syncLock.Lock()
-	defer syncLock.Unlock()
 	select {
 	case syncReloadChan <- struct{}{}:
 	default:
