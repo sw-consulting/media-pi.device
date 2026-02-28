@@ -5,10 +5,6 @@ allowed_units:
   - mnt-usb.mount
   - mnt-ya.disk.mount
   - mnt-ya.disk.automount
-  - playlist.upload.service
-  - video.upload.service
-  - playlist.upload.timer 
-  - video.upload.timer
   - play.video.service
 
 # Server key for API authentication (generate with: media-pi-agent setup)
@@ -17,5 +13,15 @@ server_key: ""
 # Listen address for REST API
 listen_addr: "0.0.0.0:8081"
 
-# Username for media-pi service operations (crontab and systemd timers, default: pi)
+# Username for media-pi service operations (default: pi)
 media_pi_service_user: "pi"
+
+# Base URL of the core API server (default: https://vezyn.fvds.ru)
+core_api_base: "https://vezyn.fvds.ru"
+
+# Maximum parallel downloads during sync (default: 3)
+max_parallel_downloads: 3
+
+# Playlist configuration
+playlist:
+  destination: "/var/media-pi/playlist.m3u"

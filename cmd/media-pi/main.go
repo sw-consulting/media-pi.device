@@ -56,6 +56,22 @@ func main() {
 	// Make the loaded config path available to the agent package for reloads
 	agent.ConfigPath = configPath
 
+	// Start sync scheduler
+	log.Println("Starting sync scheduler")
+	if err := agent.StartScheduler(); err != nil {
+		log.Fatalf("Failed to start scheduler: %v", err)
+	}
+
+	// Set callback to restart play.video service after scheduled playlist syncs
+	agent.SetScheduledSyncCallback(func() {
+		log.Println("Scheduled sync completed, restarting play.video service")
+		// Use a simple systemctl restart command for scheduled syncs
+		// This is a best-effort operation, log errors but don't fail
+		if err := agent.RestartVideoPlayServiceSimple(); err != nil {
+			log.Printf("Warning: Failed to restart play.video service after scheduled sync: %v", err)
+		}
+	})
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", agent.HandleHealth)
 	// internal authenticated reload endpoint - used by setup scripts or ExecReload
