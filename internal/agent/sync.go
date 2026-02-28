@@ -380,11 +380,11 @@ func garbageCollect(mediaDir string, expectedFiles map[string]struct{}) error {
 	return nil
 }
 
-// PerformSync performs a complete sync operation.
+// PerformSync performs a video sync operation.
 func PerformSync(ctx context.Context) error {
 	config := GetCurrentConfig()
 
-	log.Println("Starting sync operation")
+	log.Println("Starting video sync")
 	startTime := time.Now()
 
 	manifest, err := fetchManifest(ctx, config)
@@ -466,7 +466,7 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Perform playlist sync in background
 	go func() {
-		log.Println("Starting playlist-only sync")
+		log.Println("Starting playlist sync")
 		if err := PerformPlaylistSync(ctx); err != nil {
 			log.Printf("Playlist sync error: %v", err)
 		} else if callback != nil {
@@ -529,8 +529,6 @@ func downloadPlaylist(ctx context.Context, config Config) ([]byte, error) {
 func PerformPlaylistSync(ctx context.Context) error {
 	config := GetCurrentConfig()
 
-	log.Println("Starting playlist sync")
-
 	data, err := downloadPlaylist(ctx, config)
 	if err != nil {
 		return fmt.Errorf("failed to download playlist: %w", err)
@@ -552,6 +550,8 @@ func PerformPlaylistSync(ctx context.Context) error {
 		if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 			return fmt.Errorf("failed to write playlist: %w", err)
 		}
+		// Remove destination file if it exists before rename (atomic replacement)
+		_ = os.Remove(destPath)
 		if err := os.Rename(tmpPath, destPath); err != nil {
 			_ = os.Remove(tmpPath)
 			return fmt.Errorf("failed to rename playlist: %w", err)

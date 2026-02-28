@@ -668,6 +668,27 @@ func TestPerformPlaylistSync(t *testing.T) {
 	if string(content) != "test playlist" {
 		t.Errorf("playlist content = %s, want 'test playlist'", string(content))
 	}
+
+	// Test replacing existing playlist (simulate the "file exists" scenario)
+	// Write an old playlist file first
+	if err := os.WriteFile(destPath, []byte("old playlist"), 0644); err != nil {
+		t.Fatalf("failed to write old playlist: %v", err)
+	}
+
+	// Sync again - should replace the existing file
+	err = PerformPlaylistSync(context.Background())
+	if err != nil {
+		t.Errorf("PerformPlaylistSync() with existing file error = %v", err)
+	}
+
+	// Verify playlist was replaced
+	content, err = os.ReadFile(destPath)
+	if err != nil {
+		t.Errorf("failed to read replaced playlist: %v", err)
+	}
+	if string(content) != "test playlist" {
+		t.Errorf("replaced playlist content = %s, want 'test playlist'", string(content))
+	}
 }
 
 func TestTriggerSync_StopSync(t *testing.T) {
