@@ -34,7 +34,8 @@ type ManifestItem struct {
 }
 
 // Manifest represents the response from /api/devicesync endpoint.
-// The backend returns an array of ManifestItem directly.
+// The backend returns a JSON array of ManifestItem directly (IEnumerable<DeviceSyncManifestItem>),
+// rather than an object with an "items" field.
 type Manifest []ManifestItem
 
 // SyncStatus represents the last sync operation status.
