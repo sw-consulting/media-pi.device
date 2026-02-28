@@ -87,18 +87,16 @@ sudo systemctl status media-pi-agent
 - `POST /api/menu/playback/start` — запустить воспроизведение
 
 ### Синхронизация файлов
-- `POST /api/menu/playlist/start-upload` — запустить синхронизацию плейлиста с сервера
+- `POST /api/menu/playlist/start-upload` — запустить синхронизацию плейлиста
 - `POST /api/menu/playlist/stop-upload` — остановить синхронизацию плейлиста
 - `POST /api/menu/video/start-upload` — запустить синхронизацию видео файлов
 - `POST /api/menu/video/stop-upload` — остановить синхронизацию видео файлов
 
 **Примечание:** Начиная с версии 0.7.0, синхронизация файлов выполняется внутри агента, а не через отдельные systemd сервисы. Команды start-upload запускают немедленную синхронизацию, а stop-upload останавливают текущую операцию синхронизации.
 
-### Конфигурация и расписание
-- `GET /api/menu/configuration/get` — получить текущую конфигурацию
-- `PUT /api/menu/configuration/update` — обновить конфигурацию плейлиста
-- `GET /api/menu/schedule/get` — получить расписание синхронизации и интервалов отдыха
-- `PUT /api/menu/schedule/update` — обновить расписание синхронизации и интервалов отдыха
+### Конфигурация
+- `GET /api/menu/configuration/get` — получить текущую конфигурацию (включая расписание синхронизации и интервалы отдыха)
+- `PUT /api/menu/configuration/update` — обновить конфигурацию
 
 ### Системные операции
 - `GET /api/menu/storage/check` — проверка Яндекс.Диска
@@ -312,7 +310,7 @@ curl http://localhost:8081/health
 
 ### Проблемы с расписанием (crontab)
 
-Если расписание интервалов отдыха отображается некорректно через API `/api/menu/schedule/get`:
+Если расписание интервалов отдыха отображается некорректно через API `/api/menu/configuration/get`:
 
 1. Проверьте, что параметр `media_pi_service_user` в конфигурации указывает на правильного пользователя:
    ```bash
@@ -325,16 +323,6 @@ curl http://localhost:8081/health
    ```
 
 3. Убедитесь, что media-pi агент имеет права на управление crontab указанного пользователя (обычно требуется запуск от root)
-
-2. Проверьте доступность сервера управления:
-   ```bash
-   curl -I "$CORE_API_BASE/api/status/status"
-   ```
-
-3. Проверьте права доступа к конфигурации:
-   ```bash
-   ls -la /etc/media-pi-agent/
-   ```
 
 ## Удаление
 
