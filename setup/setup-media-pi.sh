@@ -118,7 +118,7 @@ else
   # Show response body if available for debugging
   if [[ -f "/tmp/registration_response.json" ]]; then
     echo "Server response:" >&2
-    cat /tmp/registration_response.json >&2
+    { cat /tmp/registration_response.json; echo; } >&2
     rm -f /tmp/registration_response.json
   fi
   
@@ -166,9 +166,9 @@ echo "  (Authentication required for /api/* endpoints)"
 echo "Attempting to reload media-pi-agent to apply configuration..."
 if systemctl is-active --quiet media-pi-agent.service; then
   if systemctl reload media-pi-agent.service; then
-    echo "\u2713 media-pi-agent reloaded via systemctl reload"
+    echo "✓ media-pi-agent reloaded via systemctl reload"
   else
-    echo "\u26a0 reload failed; restarting service"
+    echo "⚠ reload failed; restarting service"
     systemctl restart media-pi-agent.service
   fi
 fi
