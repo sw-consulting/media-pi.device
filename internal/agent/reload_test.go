@@ -64,6 +64,43 @@ media_pi_service_user: "customuser"
 	}
 }
 
+func TestReloadConfigSignalsSchedulerReload(t *testing.T) {
+	tmpDir := t.TempDir()
+	p := filepath.Join(tmpDir, "yaml")
+
+	yamlData := `allowed_units:
+  - reload.service
+server_key: "reload-key-xyz"
+listen_addr: "0.0.0.0:8081"
+`
+	if err := os.WriteFile(p, []byte(yamlData), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ConfigPath = p
+
+	// Drain any stale signals from previous tests.
+	for {
+		select {
+		case <-syncReloadChan:
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	if err := ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig failed: %v", err)
+	}
+
+	select {
+	case <-syncReloadChan:
+		// expected
+	default:
+		t.Fatalf("expected ReloadConfig to signal scheduler reload")
+	}
+}
+
 func TestInternalReloadHandler(t *testing.T) {
 	// prepare config
 	tmpDir := t.TempDir()

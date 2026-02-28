@@ -29,7 +29,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 # Allow writes to the agent config dir, audio config, media dir, sync status, and only the specific systemd unit/timer files needed
-ReadWritePaths=/etc/media-pi-agent /etc/asound.conf /var/media-pi /var/lib/media-pi-agent /etc/systemd/system/playlist.upload.timer /etc/systemd/system/video.upload.timer /etc/systemd/system/playlist.upload.service /var/spool/cron /var/spool/cron/crontabs
+ReadWritePaths=/etc/media-pi-agent /etc/asound.conf /var/media-pi /var/media-pi/sync /etc/systemd/system/playlist.upload.timer /etc/systemd/system/video.upload.timer /etc/systemd/system/playlist.upload.service /var/spool/cron /var/spool/cron/crontabs
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
