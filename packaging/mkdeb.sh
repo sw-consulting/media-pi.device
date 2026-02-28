@@ -174,6 +174,40 @@ id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
 # Reload systemd daemon to pick up new/updated service file
 systemctl daemon-reload || true
 
+# On upgrade, disable old playlist/video upload units if they exist
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    # Disable old units (best effort, don't fail if they don't exist)
+    for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            echo "Disabling old unit: $unit"
+            systemctl disable "$unit" || true
+        fi
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            echo "Stopping old unit: $unit"
+            systemctl stop "$unit" || true
+        fi
+    done
+    systemctl daemon-reload || true
+fi
+
+# Check if media directory exists and warn if not
+MEDIA_DIR="/var/media-pi"
+if [ ! -d "$MEDIA_DIR" ]; then
+    echo "Warning: Media directory $MEDIA_DIR does not exist."
+    echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."
+fi
+
+# Ensure sync status directory exists
+SYNC_STATUS_DIR="/var/lib/media-pi-agent"
+mkdir -p "$SYNC_STATUS_DIR"
+chown media-pi:media-pi "$SYNC_STATUS_DIR" 2>/dev/null || true
+chmod 755 "$SYNC_STATUS_DIR" 2>/dev/null || true
+
+# Note about systemd sandbox requirements
+echo "Note: media-pi-agent.service is sandboxed with ProtectSystem=strict."
+echo "The service file has been configured with ReadWritePaths for /var/media-pi and /var/lib/media-pi-agent"
+echo "to allow the agent to write media files and sync-status.json."
+
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then
     if [ -z "$2" ]; then
