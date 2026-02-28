@@ -203,6 +203,11 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MaxParallelDownloads = 3
 	}
 
+	// Set global variables before migration (which may need them)
+	AllowedUnits = newAllowedUnits
+	ServerKey = c.ServerKey
+	MediaPiServiceUser = c.MediaPiServiceUser
+
 	// Migrate settings from systemd files if not present in config
 	needsSave := false
 	if err := migrateConfigFromSystemd(&c, &needsSave); err != nil {
@@ -215,10 +220,6 @@ func LoadConfigFrom(path string) (*Config, error) {
 			log.Printf("Warning: Failed to save migrated configuration: %v", err)
 		}
 	}
-
-	AllowedUnits = newAllowedUnits
-	ServerKey = c.ServerKey
-	MediaPiServiceUser = c.MediaPiServiceUser
 
 	// Store the configuration for later access
 	configMutex.Lock()
