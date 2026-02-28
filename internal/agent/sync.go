@@ -65,6 +65,12 @@ var (
 	// cronScheduler manages scheduled sync operations
 	cronScheduler     *cron.Cron
 	cronSchedulerLock sync.Mutex
+
+	// Tracking for running sync processes
+	videoSyncRunning        bool
+	videoSyncRunningLock    sync.RWMutex
+	playlistSyncRunning     bool
+	playlistSyncRunningLock sync.RWMutex
 )
 
 func init() {
@@ -77,6 +83,34 @@ func GetSyncStatus() SyncStatus {
 	syncStatusLock.RLock()
 	defer syncStatusLock.RUnlock()
 	return syncStatus
+}
+
+// IsVideoSyncRunning returns whether video sync is currently running.
+func IsVideoSyncRunning() bool {
+	videoSyncRunningLock.RLock()
+	defer videoSyncRunningLock.RUnlock()
+	return videoSyncRunning
+}
+
+// IsPlaylistSyncRunning returns whether playlist sync is currently running.
+func IsPlaylistSyncRunning() bool {
+	playlistSyncRunningLock.RLock()
+	defer playlistSyncRunningLock.RUnlock()
+	return playlistSyncRunning
+}
+
+// setVideoSyncRunning sets the video sync running state.
+func setVideoSyncRunning(running bool) {
+	videoSyncRunningLock.Lock()
+	videoSyncRunning = running
+	videoSyncRunningLock.Unlock()
+}
+
+// setPlaylistSyncRunning sets the playlist sync running state.
+func setPlaylistSyncRunning(running bool) {
+	playlistSyncRunningLock.Lock()
+	playlistSyncRunning = running
+	playlistSyncRunningLock.Unlock()
 }
 
 // setSyncStatus updates the sync status in memory and optionally persists to file.
@@ -438,6 +472,8 @@ func TriggerSync(callback func()) error {
 
 	// Perform sync in background
 	go func() {
+		setVideoSyncRunning(true)
+		defer setVideoSyncRunning(false)
 		if err := PerformSync(ctx); err != nil {
 			log.Printf("Sync error: %v", err)
 		} else if callback != nil {
@@ -467,6 +503,8 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Perform playlist sync in background
 	go func() {
+		setPlaylistSyncRunning(true)
+		defer setPlaylistSyncRunning(false)
 		log.Println("Starting playlist sync")
 		if err := PerformPlaylistSync(ctx); err != nil {
 			log.Printf("Playlist sync error: %v", err)

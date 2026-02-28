@@ -204,6 +204,10 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 		}
 	})
 
+	// Set internal sync states for testing
+	setVideoSyncRunning(true)
+	t.Cleanup(func() { setVideoSyncRunning(false) })
+
 	req := httptest.NewRequest(http.MethodGet, "/api/menu/service/status", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -230,10 +234,10 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 		t.Fatalf("expected playback service to be active, got %v", resp.Data.PlaybackServiceStatus)
 	}
 	if resp.Data.PlaylistUploadServiceStatus != false {
-		t.Fatalf("expected playlist upload service to be inactive, got %v", resp.Data.PlaylistUploadServiceStatus)
+		t.Fatalf("expected playlist sync to be not running, got %v", resp.Data.PlaylistUploadServiceStatus)
 	}
 	if resp.Data.VideoUploadServiceStatus != true {
-		t.Fatalf("expected video upload service to be active, got %v", resp.Data.VideoUploadServiceStatus)
+		t.Fatalf("expected video sync to be running, got %v", resp.Data.VideoUploadServiceStatus)
 	}
 
 	// Ensure the mount detection reads our temp mounts file
@@ -243,16 +247,12 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 }
 
 // noopDBusConnectionForStatus is a test helper that reports ActiveState=active
-// for play.video.service and inactive for playlist.upload.service.
+// for play.video.service.
 type noopDBusConnectionForStatus struct{ noopDBusConnection }
 
 func (n *noopDBusConnectionForStatus) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
 	switch unit {
 	case "play.video.service":
-		return map[string]any{"ActiveState": "active"}, nil
-	case "playlist.upload.service":
-		return map[string]any{"ActiveState": "inactive"}, nil
-	case "video.upload.service":
 		return map[string]any{"ActiveState": "active"}, nil
 	default:
 		return map[string]any{"ActiveState": "inactive"}, nil
