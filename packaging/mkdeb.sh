@@ -190,22 +190,22 @@ if [ "$1" = "configure" ] && [ -n "$2" ]; then
     systemctl daemon-reload || true
 fi
 
-# Check if media directory exists and warn if not
+# Create default media directory if it doesn't exist
 MEDIA_DIR="/var/media-pi"
 if [ ! -d "$MEDIA_DIR" ]; then
-    echo "Warning: Media directory $MEDIA_DIR does not exist."
-    echo "The agent will create it automatically when needed, but you may want to ensure it's properly mounted."
-else
-    # Ensure sync status directory exists only when media directory is present
-    SYNC_STATUS_DIR="${MEDIA_DIR}/sync"
+    echo "Creating default media directory: $MEDIA_DIR"
+    mkdir -p "$MEDIA_DIR"
+    chown pi:pi "$MEDIA_DIR" 2>/dev/null || true
+    chmod 755 "$MEDIA_DIR" 2>/dev/null || true
+fi
+
+# Ensure sync status directory exists
+SYNC_STATUS_DIR="${MEDIA_DIR}/sync"
+if [ ! -d "$SYNC_STATUS_DIR" ]; then
     mkdir -p "$SYNC_STATUS_DIR"
-    chown media-pi:media-pi "$SYNC_STATUS_DIR" 2>/dev/null || true
+    chown pi:pi "$SYNC_STATUS_DIR" 2>/dev/null || true
     chmod 755 "$SYNC_STATUS_DIR" 2>/dev/null || true
 fi
-# Note about systemd sandbox requirements
-echo "Note: media-pi-agent.service is sandboxed with ProtectSystem=strict."
-echo "The service file has been configured with ReadWritePaths for /var/media-pi and /var/media-pi/sync"
-echo "to allow the agent to write media files and sync-status.json."
 
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then
