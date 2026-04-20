@@ -202,4 +202,27 @@ func TestSetupConfig(t *testing.T) {
 			t.Fatalf("expected listen addr %q, got %q", agent.DefaultListenAddr, cfg.ListenAddr)
 		}
 	})
+
+	t.Run("uses CORE_API_BASE from environment", func(t *testing.T) {
+		t.Setenv("CORE_API_BASE", "https://example.env:9999")
+
+		configPath := filepath.Join(t.TempDir(), "agent.yaml")
+		if err := agent.SetupConfig(configPath); err != nil {
+			t.Fatalf("setupConfig: %v", err)
+		}
+
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("read config: %v", err)
+		}
+
+		var cfg agent.Config
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("unmarshal config: %v", err)
+		}
+
+		if cfg.CoreAPIBase != "https://example.env:9999" {
+			t.Fatalf("expected core_api_base from env, got %q", cfg.CoreAPIBase)
+		}
+	})
 }
