@@ -92,6 +92,33 @@ cat > "${WORK}/DEBIAN/conffiles" <<EOF
 /etc/systemd/system/media-pi-agent.service
 EOF
 
+# Удаляем устаревший conffile polkit, который раньше поставлялся пакетом
+# по пути /etc/polkit-1/rules.d/90-media-pi-agent.rules.
+# Простого изменения списка conffiles недостаточно: dpkg не удаляет старый
+# conffile автоматически при апгрейде, поэтому используем рекомендованный
+# Debian-механизм через dpkg-maintscript-helper.
+cat > "${WORK}/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+dpkg-maintscript-helper rm_conffile /etc/polkit-1/rules.d/90-media-pi-agent.rules -- "$@"
+EOF
+
+cat > "${WORK}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+dpkg-maintscript-helper rm_conffile /etc/polkit-1/rules.d/90-media-pi-agent.rules -- "$@"
+EOF
+
+cat > "${WORK}/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -e
+dpkg-maintscript-helper rm_conffile /etc/polkit-1/rules.d/90-media-pi-agent.rules -- "$@"
+EOF
+
+chmod 0755 \
+  "${WORK}/DEBIAN/preinst" \
+  "${WORK}/DEBIAN/postinst" \
+  "${WORK}/DEBIAN/postrm"
 # Control file
 cat > "${WORK}/DEBIAN/control" <<EOF
 Package: ${PKG}
