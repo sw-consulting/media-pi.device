@@ -440,6 +440,10 @@ func SetupConfig(configPath string) error {
 		return fmt.Errorf("failed to read existing config: %w", err)
 	}
 
+	if coreAPIBase := strings.TrimSpace(os.Getenv("CORE_API_BASE")); coreAPIBase != "" {
+		config.CoreAPIBase = coreAPIBase
+	}
+
 	key, err := GenerateServerKey()
 	if err != nil {
 		return fmt.Errorf("failed to generate server key: %w", err)
