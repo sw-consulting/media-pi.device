@@ -206,7 +206,7 @@ type ScreenshotSettings struct {
 	IntervalMinutes int `json:"interval_minutes"`
 }
 
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+// ConfigurationSettings aggregates playlist upload configuration, schedule, audio output, and screenshot capture settings.
 type ConfigurationSettings struct {
 	Playlist   PlaylistUploadConfig `json:"playlist"`
 	Schedule   ScheduleSettings     `json:"schedule"`
