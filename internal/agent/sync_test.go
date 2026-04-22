@@ -840,15 +840,20 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	})
 
 	originalRunner := runScreenshotCommand
+	originalNow := screenshotNow
 	called := false
-	var gotTemplate string
-	runScreenshotCommand = func(pathTemplate string) error {
+	var gotPath string
+	runScreenshotCommand = func(outputPath string) error {
 		called = true
-		gotTemplate = pathTemplate
+		gotPath = outputPath
 		return nil
+	}
+	screenshotNow = func() time.Time {
+		return time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
 	}
 	t.Cleanup(func() {
 		runScreenshotCommand = originalRunner
+		screenshotNow = originalNow
 	})
 
 	if err := captureScreenshot(); err != nil {
@@ -857,8 +862,8 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	if !called {
 		t.Fatalf("expected screenshot command runner to be called")
 	}
-	if gotTemplate != "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg" {
-		t.Fatalf("unexpected template: %q", gotTemplate)
+	if gotPath != "/home/pi/Pictures/cam_2026-04-22_09-31-47.jpg" {
+		t.Fatalf("unexpected output path: %q", gotPath)
 	}
 }
 
@@ -901,7 +906,7 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 
 	originalRunner := runScreenshotCommand
 	called := false
-	runScreenshotCommand = func(pathTemplate string) error {
+	runScreenshotCommand = func(outputPath string) error {
 		called = true
 		return nil
 	}
@@ -914,5 +919,18 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("expected screenshot command runner to not be called when interval is zero")
+	}
+}
+
+func TestRenderScreenshotOutputPath(t *testing.T) {
+	now := time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
+	got := renderScreenshotOutputPath("/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg", now)
+	if got != "/home/pi/Pictures/cam_2026-04-22_09-31-47.jpg" {
+		t.Fatalf("unexpected rendered path: %q", got)
+	}
+
+	plain := renderScreenshotOutputPath("/home/pi/Pictures/cam.jpg", now)
+	if plain != "/home/pi/Pictures/cam.jpg" {
+		t.Fatalf("path without token should be unchanged, got: %q", plain)
 	}
 }

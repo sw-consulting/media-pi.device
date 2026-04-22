@@ -25,13 +25,14 @@ import (
 var (
 	syncStatusFilePath   = "/var/media-pi/sync/sync-status.json"
 	runScreenshotCapture = captureScreenshot
-	runScreenshotCommand = func(pathTemplate string) error {
-		cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf(`/usr/bin/ffmpeg -loglevel error -y -frames:v 1 "%s"`, pathTemplate))
+	runScreenshotCommand = func(outputPath string) error {
+		cmd := exec.Command("/usr/bin/ffmpeg", "-loglevel", "error", "-y", "-frames:v", "1", outputPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
+	screenshotNow = time.Now
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -753,7 +754,12 @@ func captureScreenshot() error {
 	if pathTemplate == "" {
 		return fmt.Errorf("screenshot path template not configured")
 	}
-	return runScreenshotCommand(pathTemplate)
+	return runScreenshotCommand(renderScreenshotOutputPath(pathTemplate, screenshotNow()))
+}
+
+func renderScreenshotOutputPath(pathTemplate string, now time.Time) string {
+	const dateToken = "$(date +%F_%H-%M-%S)"
+	return strings.ReplaceAll(pathTemplate, dateToken, now.Format("2006-01-02_15-04-05"))
 }
 
 // SetScheduledSyncCallback sets the callback to be called after successful scheduled syncs.
