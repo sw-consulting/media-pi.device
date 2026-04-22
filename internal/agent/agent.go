@@ -50,20 +50,27 @@ type AudioConfig struct {
 	Output string `yaml:"output,omitempty" json:"output,omitempty"`
 }
 
+// ScreenshotConfig describes periodic screenshot capture settings.
+type ScreenshotConfig struct {
+	IntervalMinutes int    `yaml:"interval_minutes,omitempty" json:"interval_minutes,omitempty"`
+	PathTemplate    string `yaml:"path_template,omitempty" json:"path_template,omitempty"`
+}
+
 // Config represents the agent configuration file structure. It is loaded
 // from YAML and contains the list of allowed systemd units, the server
 // authentication key and the listen address for the HTTP API, as well as
 // all configuration settings that were previously stored only in systemd unit files.
 type Config struct {
-	AllowedUnits         []string       `yaml:"allowed_units"`
-	ServerKey            string         `yaml:"server_key,omitempty"`
-	ListenAddr           string         `yaml:"listen_addr,omitempty"`
-	MediaPiServiceUser   string         `yaml:"media_pi_service_user,omitempty"`
-	CoreAPIBase          string         `yaml:"core_api_base,omitempty"`
-	MaxParallelDownloads int            `yaml:"max_parallel_downloads,omitempty"`
-	Playlist             PlaylistConfig `yaml:"playlist,omitempty"`
-	Schedule             ScheduleConfig `yaml:"schedule,omitempty"`
-	Audio                AudioConfig    `yaml:"audio,omitempty"`
+	AllowedUnits         []string         `yaml:"allowed_units"`
+	ServerKey            string           `yaml:"server_key,omitempty"`
+	ListenAddr           string           `yaml:"listen_addr,omitempty"`
+	MediaPiServiceUser   string           `yaml:"media_pi_service_user,omitempty"`
+	CoreAPIBase          string           `yaml:"core_api_base,omitempty"`
+	MaxParallelDownloads int              `yaml:"max_parallel_downloads,omitempty"`
+	Playlist             PlaylistConfig   `yaml:"playlist,omitempty"`
+	Schedule             ScheduleConfig   `yaml:"schedule,omitempty"`
+	Audio                AudioConfig      `yaml:"audio,omitempty"`
+	Screenshot           ScreenshotConfig `yaml:"screenshot,omitempty"`
 }
 
 // APIResponse is the standard envelope used by HTTP handlers to return
@@ -157,6 +164,9 @@ func DefaultConfig() Config {
 		Playlist: PlaylistConfig{
 			Destination: "/var/media-pi",
 		},
+		Screenshot: ScreenshotConfig{
+			PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+		},
 	}
 }
 
@@ -203,6 +213,11 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.MaxParallelDownloads = 3
 	}
 
+	// Set default screenshot path template if not specified.
+	if strings.TrimSpace(c.Screenshot.PathTemplate) == "" {
+		c.Screenshot.PathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+	}
+
 	// Set global variables before migration (which may need them)
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
@@ -243,7 +258,7 @@ func GetCurrentConfig() Config {
 
 // UpdateConfigSettings updates the configuration settings in memory and saves to file.
 // This function is thread-safe. After saving, it signals the scheduler to reload.
-func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audio AudioConfig) error {
+func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audio AudioConfig, screenshot ScreenshotConfig) error {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -255,6 +270,7 @@ func UpdateConfigSettings(playlist PlaylistConfig, schedule ScheduleConfig, audi
 	currentConfig.Playlist = playlist
 	currentConfig.Schedule = schedule
 	currentConfig.Audio = audio
+	currentConfig.Screenshot = screenshot
 
 	// Save to file
 	if ConfigPath == "" {

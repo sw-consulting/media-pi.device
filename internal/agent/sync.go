@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,7 +23,15 @@ import (
 )
 
 var (
-	syncStatusFilePath = "/var/media-pi/sync/sync-status.json"
+	syncStatusFilePath   = "/var/media-pi/sync/sync-status.json"
+	runScreenshotCapture = captureScreenshot
+	runScreenshotCommand = func(pathTemplate string) error {
+		cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf(`/usr/bin/ffmpeg -loglevel error -y -frames:v 1 "%s"`, pathTemplate))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -709,6 +718,21 @@ func schedulerLoop() {
 			}
 		}
 
+		// Add periodic screenshot capture task.
+		if config.Screenshot.IntervalMinutes > 0 {
+			cronSpec := fmt.Sprintf("@every %dm", config.Screenshot.IntervalMinutes)
+			cronSchedulerLock.Lock()
+			_, err := cronScheduler.AddFunc(cronSpec, func() {
+				if err := runScreenshotCapture(); err != nil {
+					log.Printf("Failed to capture screenshot: %v", err)
+				}
+			})
+			cronSchedulerLock.Unlock()
+			if err != nil {
+				log.Printf("Warning: Failed to schedule screenshot capture every %d minutes: %v", config.Screenshot.IntervalMinutes, err)
+			}
+		}
+
 		// Start scheduler with lock protection
 		cronSchedulerLock.Lock()
 		cronScheduler.Start()
@@ -718,6 +742,15 @@ func schedulerLoop() {
 		<-syncReloadChan
 		log.Println("Reloading sync schedule")
 	}
+}
+
+func captureScreenshot() error {
+	cfg := GetCurrentConfig()
+	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
+	if pathTemplate == "" {
+		return fmt.Errorf("screenshot path template not configured")
+	}
+	return runScreenshotCommand(pathTemplate)
 }
 
 // SetScheduledSyncCallback sets the callback to be called after successful scheduled syncs.

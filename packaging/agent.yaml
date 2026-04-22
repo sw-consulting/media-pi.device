@@ -25,3 +25,8 @@ max_parallel_downloads: 3
 # Playlist configuration
 playlist:
   destination: "/var/media-pi"
+
+# Screenshot configuration
+screenshot:
+  interval_minutes: 0
+  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"

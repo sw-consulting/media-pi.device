@@ -308,6 +308,10 @@ func TestHandleConfigurationGet(t *testing.T) {
 		Audio: AudioConfig{
 			Output: "hdmi",
 		},
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+		},
 	}
 
 	// Save and restore original config
@@ -361,6 +365,9 @@ func TestHandleConfigurationGet(t *testing.T) {
 
 	if resp.Data.Audio.Output != "hdmi" {
 		t.Fatalf("expected hdmi output, got %s", resp.Data.Audio.Output)
+	}
+	if resp.Data.Screenshot.IntervalMinutes != 30 {
+		t.Fatalf("expected screenshot interval 30, got %d", resp.Data.Screenshot.IntervalMinutes)
 	}
 }
 
@@ -416,7 +423,7 @@ WantedBy = multi-user.target
 		CrontabWriteFunc = originalWrite
 	})
 
-	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
+	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"},"screenshot":{"interval_minutes":20}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -466,6 +473,7 @@ WantedBy = multi-user.target
 	if !strings.Contains(string(audioData), "card 1") {
 		t.Fatalf("expected jack config, got %s", string(audioData))
 	}
+
 }
 
 func TestWriteTimerScheduleProducesValidUnit(t *testing.T) {
@@ -526,6 +534,42 @@ func TestHandleConfigurationUploadValidation(t *testing.T) {
 	}
 }
 
+func TestHandleConfigurationUploadValidationRejectsNegativeScreenshotInterval(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["08:00"],"video":["08:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"interval_minutes":-1}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
 func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	ServerKey = "test-key"
 
@@ -574,7 +618,7 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	})
 
 	// Test with empty source - should use default
-	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"}}`
+	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"interval_minutes":15}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -593,6 +637,10 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 
 	if !strings.Contains(string(updatedService), "media-pi.core server /mnt/usb/test/") {
 		t.Errorf("expected default source 'media-pi.core server' in service file, got: %s", string(updatedService))
+	}
+
+	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
+		t.Errorf("expected screenshot interval 15 in config, got %d", cfg.Screenshot.IntervalMinutes)
 	}
 }
 

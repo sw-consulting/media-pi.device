@@ -201,11 +201,17 @@ type AudioSettings struct {
 	Output string `json:"output"`
 }
 
+// ScreenshotSettings describes periodic screenshot capture settings.
+type ScreenshotSettings struct {
+	IntervalMinutes int `json:"interval_minutes"`
+}
+
 // ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
 type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot ScreenshotSettings   `json:"screenshot"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -594,6 +600,9 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		Audio: AudioSettings{
 			Output: cfg.Audio.Output,
 		},
+		Screenshot: ScreenshotSettings{
+			IntervalMinutes: cfg.Screenshot.IntervalMinutes,
+		},
 	}})
 }
 
@@ -638,6 +647,10 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateAudioOutput(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+	if req.Screenshot.IntervalMinutes < 0 {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "screenshot.interval_minutes не может быть отрицательным"})
 		return
 	}
 
@@ -692,6 +705,10 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
+		ScreenshotConfig{
+			IntervalMinutes: req.Screenshot.IntervalMinutes,
+			PathTemplate:    GetCurrentConfig().Screenshot.PathTemplate,
+		},
 	); err != nil {
 		log.Printf("Warning: Failed to update config file: %v", err)
 	}

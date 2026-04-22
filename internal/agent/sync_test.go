@@ -822,3 +822,61 @@ func TestContextCancellation(t *testing.T) {
 		t.Errorf("syncFiles() should return context.Canceled, got: %v", err)
 	}
 }
+
+func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	called := false
+	var gotTemplate string
+	runScreenshotCommand = func(pathTemplate string) error {
+		called = true
+		gotTemplate = pathTemplate
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+	})
+
+	if err := captureScreenshot(); err != nil {
+		t.Fatalf("captureScreenshot() returned error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected screenshot command runner to be called")
+	}
+	if gotTemplate != "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg" {
+		t.Fatalf("unexpected template: %q", gotTemplate)
+	}
+}
+
+func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			PathTemplate: "   ",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	if err := captureScreenshot(); err == nil {
+		t.Fatalf("expected error when screenshot template is empty")
+	}
+}
