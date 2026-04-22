@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -820,5 +821,388 @@ func TestContextCancellation(t *testing.T) {
 	err := syncFiles(ctx, config, manifest)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("syncFiles() should return context.Canceled, got: %v", err)
+	}
+}
+
+func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	picturesDir := filepath.Join(tmp, "Pictures")
+	pathTemplate := filepath.Join(picturesDir, "cam_$(date +%F_%H-%M-%S).jpg")
+	expectedPath := filepath.Join(picturesDir, "cam_2026-04-22_09-31-47.jpg")
+	uploaded := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploaded = true
+		if r.URL.Path != "/api/devicesync/screenshot" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if got := r.Header.Get("X-Device-Id"); got != "test-device-key" {
+			t.Fatalf("unexpected X-Device-Id header: %q", got)
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("expected multipart file named 'file': %v", err)
+		}
+		defer func() {
+			if err := file.Close(); err != nil {
+				t.Errorf("failed to close uploaded file: %v", err)
+			}
+		}()
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-device-key",
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    pathTemplate,
+			Input:           "/dev/video0",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	originalNow := screenshotNow
+	called := false
+	var gotInput string
+	var gotPath string
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		called = true
+		gotInput = inputPath
+		gotPath = outputPath
+		return os.WriteFile(outputPath, []byte("fake-image"), 0644)
+	}
+	screenshotNow = func() time.Time {
+		return time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+		screenshotNow = originalNow
+	})
+
+	if err := captureScreenshot(); err != nil {
+		t.Fatalf("captureScreenshot() returned error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected screenshot command runner to be called")
+	}
+	if gotInput != "/dev/video0" {
+		t.Fatalf("unexpected input path: %q", gotInput)
+	}
+	if gotPath != expectedPath {
+		t.Fatalf("unexpected output path: %q", gotPath)
+	}
+	if !uploaded {
+		t.Fatalf("expected screenshot upload request")
+	}
+	if _, err := os.Stat(expectedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected screenshot file to be deleted after successful upload")
+	}
+}
+
+func TestCaptureScreenshotKeepsFileWhenUploadFails(t *testing.T) {
+	tmp := t.TempDir()
+	picturesDir := filepath.Join(tmp, "Pictures")
+	pathTemplate := filepath.Join(picturesDir, "cam_$(date +%F_%H-%M-%S).jpg")
+	expectedPath := filepath.Join(picturesDir, "cam_2026-04-22_09-31-47.jpg")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("upload failed"))
+	}))
+	defer server.Close()
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-device-key",
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    pathTemplate,
+			Input:           "/dev/video0",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	originalNow := screenshotNow
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		return os.WriteFile(outputPath, []byte("fake-image"), 0644)
+	}
+	screenshotNow = func() time.Time {
+		return time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+		screenshotNow = originalNow
+	})
+
+	err := captureScreenshot()
+	if err == nil {
+		t.Fatalf("expected error when screenshot upload fails")
+	}
+	if _, statErr := os.Stat(expectedPath); statErr != nil {
+		t.Fatalf("expected screenshot file to be kept on upload failure, stat error: %v", statErr)
+	}
+}
+
+func TestUploadScreenshotPostsMultipartFile(t *testing.T) {
+	tmp := t.TempDir()
+	filePath := filepath.Join(tmp, "shot.jpg")
+	if err := os.WriteFile(filePath, []byte("image-bytes"), 0644); err != nil {
+		t.Fatalf("failed to create screenshot test file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/devicesync/screenshot" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if got := r.Header.Get("X-Device-Id"); got != "test-device-key" {
+			t.Fatalf("unexpected X-Device-Id header: %q", got)
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("expected multipart file named 'file': %v", err)
+		}
+		defer func() { _ = file.Close() }()
+		if header.Filename != "shot.jpg" {
+			t.Fatalf("unexpected uploaded filename: %s", header.Filename)
+		}
+		data, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatalf("failed to read uploaded file body: %v", err)
+		}
+		if string(data) != "image-bytes" {
+			t.Fatalf("unexpected uploaded file body: %q", string(data))
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	err := uploadScreenshot(context.Background(), Config{CoreAPIBase: server.URL, ServerKey: "test-device-key"}, filePath)
+	if err != nil {
+		t.Fatalf("uploadScreenshot() error = %v", err)
+	}
+}
+
+func TestCaptureScreenshotResendsPendingFilesWithLimit(t *testing.T) {
+	tmp := t.TempDir()
+	picturesDir := filepath.Join(tmp, "Pictures")
+	pathTemplate := filepath.Join(picturesDir, "cam_$(date +%F_%H-%M-%S).jpg")
+
+	if err := os.MkdirAll(picturesDir, 0755); err != nil {
+		t.Fatalf("failed to create pictures dir: %v", err)
+	}
+	pendingFiles := []string{
+		filepath.Join(picturesDir, "cam_2026-04-22_09-31-40.jpg"),
+		filepath.Join(picturesDir, "cam_2026-04-22_09-31-41.jpg"),
+		filepath.Join(picturesDir, "cam_2026-04-22_09-31-42.jpg"),
+	}
+	for _, filePath := range pendingFiles {
+		if err := os.WriteFile(filePath, []byte("old-image"), 0644); err != nil {
+			t.Fatalf("failed to create pending file %s: %v", filePath, err)
+		}
+	}
+
+	uploadedNames := make([]string, 0, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("expected multipart file named 'file': %v", err)
+		}
+		_ = file.Close()
+		uploadedNames = append(uploadedNames, header.Filename)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-device-key",
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    pathTemplate,
+			Input:           "/dev/video0",
+			ResendLimit:     2,
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	originalNow := screenshotNow
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		return os.WriteFile(outputPath, []byte("new-image"), 0644)
+	}
+	screenshotNow = func() time.Time {
+		return time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+		screenshotNow = originalNow
+	})
+
+	if err := captureScreenshot(); err != nil {
+		t.Fatalf("captureScreenshot() returned error: %v", err)
+	}
+
+	if len(uploadedNames) != 3 {
+		t.Fatalf("expected 3 uploads (2 pending + 1 new), got %d", len(uploadedNames))
+	}
+
+	remaining := 0
+	for _, filePath := range pendingFiles {
+		if _, err := os.Stat(filePath); err == nil {
+			remaining++
+		}
+	}
+	if remaining != 1 {
+		t.Fatalf("expected 1 pending file to remain after limited resend, got %d", remaining)
+	}
+}
+
+func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    "   ",
+			Input:           "/dev/video0",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	if err := captureScreenshot(); err == nil {
+		t.Fatalf("expected error when screenshot template is empty")
+	}
+}
+
+func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 0,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:           "/dev/video0",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	called := false
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+	})
+
+	if err := captureScreenshot(); err != nil {
+		t.Fatalf("captureScreenshot() returned error: %v", err)
+	}
+	if called {
+		t.Fatalf("expected screenshot command runner to not be called when interval is zero")
+	}
+}
+
+func TestCaptureScreenshotRequiresInput(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:           "   ",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	if err := captureScreenshot(); err == nil {
+		t.Fatalf("expected error when screenshot input is empty")
+	}
+}
+
+func TestRenderScreenshotOutputPath(t *testing.T) {
+	now := time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
+	got := renderScreenshotOutputPath("/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg", now)
+	if got != "/home/pi/Pictures/cam_2026-04-22_09-31-47.jpg" {
+		t.Fatalf("unexpected rendered path: %q", got)
+	}
+
+	plain := renderScreenshotOutputPath("/home/pi/Pictures/cam.jpg", now)
+	if plain != "/home/pi/Pictures/cam.jpg" {
+		t.Fatalf("path without token should be unchanged, got: %q", plain)
+	}
+}
+
+func TestUniqueOutputPath(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "cam_2026-01-02_09-00-00.jpg")
+
+	// When no file exists, path is returned unchanged.
+	if got := uniqueOutputPath(base); got != base {
+		t.Errorf("expected unchanged path %q, got %q", base, got)
+	}
+
+	// When base exists, _1 suffix is appended.
+	if err := os.WriteFile(base, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	want1 := filepath.Join(dir, "cam_2026-01-02_09-00-00_1.jpg")
+	if got := uniqueOutputPath(base); got != want1 {
+		t.Errorf("expected %q, got %q", want1, got)
+	}
+
+	// When base and _1 both exist, _2 suffix is appended.
+	if err := os.WriteFile(want1, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	want2 := filepath.Join(dir, "cam_2026-01-02_09-00-00_2.jpg")
+	if got := uniqueOutputPath(base); got != want2 {
+		t.Errorf("expected %q, got %q", want2, got)
 	}
 }

@@ -160,6 +160,13 @@ func GetMenuActions() []MenuAction {
 			Path:        "/api/menu/video/stop-upload",
 		},
 		{
+			ID:          "take-screenshot",
+			Name:        "Сделать снимок",
+			Description: "Сделать снимок немедленно",
+			Method:      "GET",
+			Path:        "/api/menu/screenshot/take",
+		},
+		{
 			ID:          "system-reload",
 			Name:        "Применить изменения",
 			Description: "Перезагрузить конфигурацию systemd",
@@ -202,11 +209,26 @@ type AudioSettings struct {
 	Output string `json:"output"`
 }
 
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+// ScreenshotSettings describes periodic screenshot capture settings.
+type ScreenshotSettings struct {
+	IntervalMinutes int `json:"intervalMinutes"`
+}
+
+// ConfigurationSettings aggregates playlist upload configuration, schedule, audio output, and screenshot capture settings.
 type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot ScreenshotSettings   `json:"screenshot"`
+}
+
+// configurationUpdateRequest mirrors ConfigurationSettings but keeps Screenshot as a pointer
+// to preserve backwards compatibility with clients that omit the screenshot object.
+type configurationUpdateRequest struct {
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot *ScreenshotSettings  `json:"screenshot,omitempty"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -652,6 +674,9 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		Audio: AudioSettings{
 			Output: cfg.Audio.Output,
 		},
+		Screenshot: ScreenshotSettings{
+			IntervalMinutes: cfg.Screenshot.IntervalMinutes,
+		},
 	}})
 }
 
@@ -661,7 +686,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req ConfigurationSettings
+	var req configurationUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON в теле запроса"})
 		return
@@ -696,6 +721,17 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateAudioOutput(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+
+	// Snapshot current config once to avoid inconsistency from concurrent reloads.
+	cfg := GetCurrentConfig()
+	screenshotIntervalMinutes := cfg.Screenshot.IntervalMinutes
+	if req.Screenshot != nil {
+		screenshotIntervalMinutes = req.Screenshot.IntervalMinutes
+	}
+	if screenshotIntervalMinutes < 0 {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "screenshot.intervalMinutes не может быть отрицательным"})
 		return
 	}
 
@@ -736,11 +772,8 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update configuration file with all settings
-	// Note: We log but don't fail on config file update errors during migration period.
-	// Systemd files remain the operational source of truth, and YAML file is being
-	// introduced as the new configuration store. On next agent restart, the YAML will
-	// be populated via migration if still missing.
+	// Update configuration file with all settings. This also signals the scheduler
+	// to reload, which is required for screenshot interval changes to take effect.
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
 		restConfigPairs[i] = RestTimePairConfig(p)
@@ -750,8 +783,15 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
+		ScreenshotConfig{
+			IntervalMinutes: screenshotIntervalMinutes,
+			PathTemplate:    cfg.Screenshot.PathTemplate,
+			Input:           cfg.Screenshot.Input,
+			ResendLimit:     cfg.Screenshot.ResendLimit,
+		},
 	); err != nil {
-		log.Printf("Warning: Failed to update config file: %v", err)
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось сохранить конфигурацию: %v", err)})
+		return
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: MenuActionResponse{Action: "configuration-update", Result: "success", Message: "Конфигурация обновлена"}})
@@ -980,6 +1020,35 @@ func HandleVideoStopUpload(w http.ResponseWriter, r *http.Request) {
 			Message: "Загрузка видео остановлена",
 		},
 	})
+}
+
+// HandleTakeScreenshot captures a screenshot immediately and returns it as a file response.
+// Unlike scheduled capture, it does not resend pending screenshots or upload to backend.
+func HandleTakeScreenshot(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	filePath, err := captureScreenshotFileOnly()
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось сделать снимок: %v", err)})
+		return
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось прочитать снимок: %v", err)})
+		return
+	}
+
+	if err := os.Remove(filePath); err != nil {
+		log.Printf("Warning: failed to remove temporary screenshot %s: %v", filePath, err)
+	}
+
+	w.Header().Set("Content-Type", http.DetectContentType(data))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filepath.Base(filePath)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // RestartVideoPlayService restarts the play.video.service via D-Bus.

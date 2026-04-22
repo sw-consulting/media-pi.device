@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,9 +12,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,8 +26,42 @@ import (
 )
 
 var (
-	syncStatusFilePath = "/var/media-pi/sync/sync-status.json"
+	syncStatusFilePath   = "/var/media-pi/sync/sync-status.json"
+	runScreenshotCapture = captureScreenshot
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		ffmpegPath, err := resolveFFmpegPath()
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(ffmpegPath, "-loglevel", "error", "-y", "-i", inputPath, "-frames:v", "1", outputPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		log.Printf("Debug: created device screenshot at %s", outputPath)
+		return nil
+	}
+	screenshotNow = time.Now
 )
+
+// resolveFFmpegPath returns the path to the ffmpeg binary. It checks the
+// FFMPEG_PATH environment variable first, then falls back to exec.LookPath.
+func resolveFFmpegPath() (string, error) {
+	if envFFmpegPath := strings.TrimSpace(os.Getenv("FFMPEG_PATH")); envFFmpegPath != "" {
+		info, err := os.Stat(envFFmpegPath)
+		if err != nil {
+			return "", fmt.Errorf("FFMPEG_PATH %q is not accessible: %w", envFFmpegPath, err)
+		}
+		if info.IsDir() || info.Mode()&0o111 == 0 {
+			return "", fmt.Errorf("FFMPEG_PATH %q is not an executable file", envFFmpegPath)
+		}
+		return envFFmpegPath, nil
+	}
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg executable not found in PATH: %w", err)
+	}
+	return ffmpegPath, nil
+}
 
 // ManifestItem represents a single file in the sync manifest.
 type ManifestItem struct {
@@ -709,6 +747,26 @@ func schedulerLoop() {
 			}
 		}
 
+		// Add periodic screenshot capture task.
+		// SkipIfStillRunning ensures at most one ffmpeg process runs at a time:
+		// if a capture is still in progress when the next tick fires, that tick is dropped.
+		if config.Screenshot.IntervalMinutes > 0 {
+			cronSpec := fmt.Sprintf("@every %dm", config.Screenshot.IntervalMinutes)
+			screenshotJob := cron.NewChain(
+				cron.SkipIfStillRunning(cron.DiscardLogger),
+			).Then(cron.FuncJob(func() {
+				if err := runScreenshotCapture(); err != nil {
+					log.Printf("Failed to capture screenshot: %v", err)
+				}
+			}))
+			cronSchedulerLock.Lock()
+			_, err := cronScheduler.AddJob(cronSpec, screenshotJob)
+			cronSchedulerLock.Unlock()
+			if err != nil {
+				log.Printf("Warning: Failed to schedule screenshot capture every %d minutes: %v", config.Screenshot.IntervalMinutes, err)
+			}
+		}
+
 		// Start scheduler with lock protection
 		cronSchedulerLock.Lock()
 		cronScheduler.Start()
@@ -717,6 +775,202 @@ func schedulerLoop() {
 		// Wait for reload signal
 		<-syncReloadChan
 		log.Println("Reloading sync schedule")
+	}
+}
+
+func captureScreenshot() error {
+	cfg := GetCurrentConfig()
+	if cfg.Screenshot.IntervalMinutes <= 0 {
+		return nil
+	}
+	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
+	if pathTemplate == "" {
+		return fmt.Errorf("screenshot path template not configured")
+	}
+	input := strings.TrimSpace(cfg.Screenshot.Input)
+	if input == "" {
+		return fmt.Errorf("screenshot input is not configured")
+	}
+	outputPath := uniqueOutputPath(renderScreenshotOutputPath(pathTemplate, screenshotNow()))
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("create screenshot output directory %q: %w", outputDir, err)
+	}
+
+	if err := resendPendingScreenshots(context.Background(), cfg, outputDir, outputPath); err != nil {
+		log.Printf("Warning: pending screenshot resend encountered errors: %v", err)
+	}
+
+	if err := runScreenshotCommand(input, outputPath); err != nil {
+		return err
+	}
+
+	if err := uploadScreenshot(context.Background(), cfg, outputPath); err != nil {
+		return fmt.Errorf("upload screenshot %q: %w", outputPath, err)
+	}
+
+	if err := os.Remove(outputPath); err != nil {
+		return fmt.Errorf("delete uploaded screenshot %q: %w", outputPath, err)
+	}
+
+	log.Printf("Debug: uploaded and removed screenshot %s", outputPath)
+	return nil
+}
+
+func captureScreenshotFileOnly() (string, error) {
+	cfg := GetCurrentConfig()
+	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
+	if pathTemplate == "" {
+		return "", fmt.Errorf("screenshot path template not configured")
+	}
+	input := strings.TrimSpace(cfg.Screenshot.Input)
+	if input == "" {
+		return "", fmt.Errorf("screenshot input is not configured")
+	}
+
+	outputPath := uniqueOutputPath(renderScreenshotOutputPath(pathTemplate, screenshotNow()))
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return "", fmt.Errorf("create screenshot output directory %q: %w", outputDir, err)
+	}
+	if err := runScreenshotCommand(input, outputPath); err != nil {
+		return "", err
+	}
+
+	return outputPath, nil
+}
+
+func resendPendingScreenshots(ctx context.Context, config Config, screenshotDir, currentCapturePath string) error {
+	limit := config.Screenshot.ResendLimit
+	if limit <= 0 {
+		limit = DefaultScreenshotResendLimit
+	}
+
+	pending, err := listPendingScreenshotFiles(screenshotDir, currentCapturePath)
+	if err != nil {
+		return fmt.Errorf("list pending screenshots: %w", err)
+	}
+
+	if len(pending) > limit {
+		pending = pending[:limit]
+	}
+
+	var resendErrors []string
+	for _, path := range pending {
+		if err := uploadScreenshot(ctx, config, path); err != nil {
+			resendErrors = append(resendErrors, fmt.Sprintf("%s: %v", path, err))
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			resendErrors = append(resendErrors, fmt.Sprintf("%s: delete failed: %v", path, err))
+			continue
+		}
+		log.Printf("Debug: resent and removed pending screenshot %s", path)
+	}
+
+	if len(resendErrors) > 0 {
+		return fmt.Errorf("%v", resendErrors)
+	}
+
+	return nil
+}
+
+func listPendingScreenshotFiles(screenshotDir, currentCapturePath string) ([]string, error) {
+	entries, err := os.ReadDir(screenshotDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	currentName := filepath.Base(currentCapturePath)
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if entry.Name() == currentName {
+			continue
+		}
+		files = append(files, filepath.Join(screenshotDir, entry.Name()))
+	}
+
+	sort.Strings(files)
+	return files, nil
+}
+
+func uploadScreenshot(ctx context.Context, config Config, screenshotPath string) error {
+	if strings.TrimSpace(config.CoreAPIBase) == "" {
+		return fmt.Errorf("core_api_base not configured")
+	}
+	if strings.TrimSpace(config.ServerKey) == "" {
+		return fmt.Errorf("server_key not configured")
+	}
+
+	file, err := os.Open(screenshotPath)
+	if err != nil {
+		return fmt.Errorf("open screenshot: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", filepath.Base(screenshotPath))
+	if err != nil {
+		return fmt.Errorf("create multipart file part: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return fmt.Errorf("write multipart file part: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("finalize multipart body: %w", err)
+	}
+
+	url := strings.TrimRight(config.CoreAPIBase, "/") + "/api/devicesync/screenshot"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-Device-Id", config.ServerKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post screenshot: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func renderScreenshotOutputPath(pathTemplate string, now time.Time) string {
+	const dateToken = "$(date +%F_%H-%M-%S)"
+	return strings.ReplaceAll(pathTemplate, dateToken, now.Format("2006-01-02_15-04-05"))
+}
+
+// uniqueOutputPath returns path unchanged if no file exists at that location.
+// When a file already exists, it appends an incrementing counter before the
+// file extension (e.g. "cam_2026-01-02_09-00-00_1.jpg") until it finds a
+// path that does not exist, preventing an existing pending screenshot from
+// being silently overwritten.
+func uniqueOutputPath(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", base, i, ext)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
 	}
 }
 

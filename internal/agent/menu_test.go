@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHandleMenuList(t *testing.T) {
@@ -99,6 +100,7 @@ func TestGetMenuActions(t *testing.T) {
 		"configuration-update",
 		"playlist-start-upload",
 		"playlist-stop-upload",
+		"take-screenshot",
 		"system-reload",
 		"system-reboot",
 		"system-shutdown",
@@ -308,6 +310,10 @@ func TestHandleConfigurationGet(t *testing.T) {
 		Audio: AudioConfig{
 			Output: "hdmi",
 		},
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+		},
 	}
 
 	// Save and restore original config
@@ -362,6 +368,9 @@ func TestHandleConfigurationGet(t *testing.T) {
 	if resp.Data.Audio.Output != "hdmi" {
 		t.Fatalf("expected hdmi output, got %s", resp.Data.Audio.Output)
 	}
+	if resp.Data.Screenshot.IntervalMinutes != 30 {
+		t.Fatalf("expected screenshot interval 30, got %d", resp.Data.Screenshot.IntervalMinutes)
+	}
 }
 
 func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
@@ -377,16 +386,29 @@ func TestHandleConfigurationUploadWritesAllConfig(t *testing.T) {
 	originalPlaylist := PlaylistTimerPath
 	originalVideo := VideoTimerPath
 	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
 	PlaylistServicePath = servicePath
 	PlaylistTimerPath = playlistTimer
 	VideoTimerPath = videoTimer
 	AudioConfigPath = audioPath
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
 	t.Cleanup(func() {
 		PlaylistServicePath = originalServicePath
 		PlaylistTimerPath = originalPlaylist
 		VideoTimerPath = originalVideo
 		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
 	})
+
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Destination: "/mnt/usb"},
+		Audio:      AudioConfig{Output: "hdmi"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
 
 	serviceContent := `[Unit]
 Description = Rsync playlist upload service
@@ -416,7 +438,7 @@ WantedBy = multi-user.target
 		CrontabWriteFunc = originalWrite
 	})
 
-	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"}}`
+	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"},"screenshot":{"intervalMinutes":20}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -466,6 +488,7 @@ WantedBy = multi-user.target
 	if !strings.Contains(string(audioData), "card 1") {
 		t.Fatalf("expected jack config, got %s", string(audioData))
 	}
+
 }
 
 func TestWriteTimerScheduleProducesValidUnit(t *testing.T) {
@@ -526,6 +549,42 @@ func TestHandleConfigurationUploadValidation(t *testing.T) {
 	}
 }
 
+func TestHandleConfigurationUploadValidationRejectsNegativeScreenshotInterval(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["08:00"],"video":["08:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"intervalMinutes":-1}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
 func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	ServerKey = "test-key"
 
@@ -574,7 +633,7 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	})
 
 	// Test with empty source - should use default
-	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"}}`
+	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"intervalMinutes":15}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -593,6 +652,74 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 
 	if !strings.Contains(string(updatedService), "media-pi.core server /mnt/usb/test/") {
 		t.Errorf("expected default source 'media-pi.core server' in service file, got: %s", string(updatedService))
+	}
+
+	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
+		t.Errorf("expected screenshot interval 15 in config, got %d", cfg.Screenshot.IntervalMinutes)
+	}
+}
+
+func TestHandleConfigurationUpdatePreservesScreenshotIntervalWhenOmitted(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /old/src /old/dst"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Source: "media-pi.core server", Destination: "/mnt/usb"},
+		Schedule:   ScheduleConfig{Playlist: []string{"08:00"}, Video: []string{"12:00"}},
+		Audio:      AudioConfig{Output: "hdmi"},
+		Screenshot: ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/tmp/cam.jpg", Input: "/dev/video0"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	CrontabWriteFunc = func(string) error { return nil }
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	body := `{"playlist":{"source":"media-pi.core server","destination":"/mnt/usb/test/"},"schedule":{"playlist":["09:00"],"video":["13:00"],"rest":[]},"audio":{"output":"jack"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
+		t.Fatalf("expected screenshot interval to remain 15, got %d", cfg.Screenshot.IntervalMinutes)
 	}
 }
 
@@ -735,6 +862,7 @@ func TestGetMenuActionsIncludesNewActions(t *testing.T) {
 		"playlist-stop-upload",
 		"video-start-upload",
 		"video-stop-upload",
+		"take-screenshot",
 	}
 
 	foundIDs := make(map[string]bool)
@@ -856,6 +984,88 @@ func TestCrontabUserOperations(t *testing.T) {
 	expectedWriteArgsEmpty := []string{"crontab", "-u", "pi", "-"}
 	if !reflect.DeepEqual(writeArgs, expectedWriteArgsEmpty) {
 		t.Errorf("expected write args %v, got %v", expectedWriteArgsEmpty, writeArgs)
+	}
+}
+
+func TestHandleTakeScreenshotMethodNotAllowed(t *testing.T) {
+	ServerKey = "test-key"
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/screenshot/take", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleTakeScreenshot(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleTakeScreenshotReturnsFileWithoutResend(t *testing.T) {
+	ServerKey = "test-key"
+	tmp := t.TempDir()
+	picturesDir := filepath.Join(tmp, "Pictures")
+	pathTemplate := filepath.Join(picturesDir, "cam_$(date +%F_%H-%M-%S).jpg")
+	expectedNewPath := filepath.Join(picturesDir, "cam_2026-04-30_12-00-00.jpg")
+	oldPendingPath := filepath.Join(picturesDir, "cam_2026-04-30_11-59-00.jpg")
+
+	if err := os.MkdirAll(picturesDir, 0755); err != nil {
+		t.Fatalf("failed to create pictures directory: %v", err)
+	}
+	if err := os.WriteFile(oldPendingPath, []byte("old-pending"), 0644); err != nil {
+		t.Fatalf("failed to create old pending screenshot: %v", err)
+	}
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    pathTemplate,
+			Input:           "/dev/video0",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	originalNow := screenshotNow
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		return os.WriteFile(outputPath, []byte("fresh-image"), 0644)
+	}
+	screenshotNow = func() time.Time {
+		return time.Date(2026, time.April, 30, 12, 0, 0, 0, time.UTC)
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+		screenshotNow = originalNow
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/menu/screenshot/take", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleTakeScreenshot(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if got := w.Body.String(); got != "fresh-image" {
+		t.Fatalf("unexpected screenshot body: %q", got)
+	}
+	if got := w.Header().Get("Content-Disposition"); !strings.Contains(got, "cam_2026-04-30_12-00-00.jpg") {
+		t.Fatalf("unexpected Content-Disposition header: %q", got)
+	}
+
+	if _, err := os.Stat(oldPendingPath); err != nil {
+		t.Fatalf("expected old pending screenshot to remain untouched, stat error: %v", err)
+	}
+	if _, err := os.Stat(expectedNewPath); !os.IsNotExist(err) {
+		t.Fatalf("expected newly captured screenshot file to be removed after response")
 	}
 }
 

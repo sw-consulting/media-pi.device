@@ -28,8 +28,25 @@ const (
 	serverIdleTimeout  = 60 * time.Second
 )
 
-func main() {
+func isSystemdServiceRun() bool {
+	// systemd sets these environment variables for service processes.
+	return os.Getenv("INVOCATION_ID") != "" || os.Getenv("JOURNAL_STREAM") != ""
+}
+
+func configureLogging() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	if isSystemdServiceRun() {
+		// Keep service logs on stderr so systemd/journald captures them.
+		log.SetOutput(os.Stderr)
+		return
+	}
+
+	// CLI/application runs should log directly to the console.
+	log.SetOutput(os.Stdout)
+}
+
+func main() {
+	configureLogging()
 
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		configPath := "/etc/media-pi-agent/agent.yaml"
@@ -99,6 +116,7 @@ func main() {
 	mux.HandleFunc("/api/menu/playlist/stop-upload", agent.AuthMiddleware(agent.HandlePlaylistStopUpload))
 	mux.HandleFunc("/api/menu/video/start-upload", agent.AuthMiddleware(agent.HandleVideoStartUpload))
 	mux.HandleFunc("/api/menu/video/stop-upload", agent.AuthMiddleware(agent.HandleVideoStopUpload))
+	mux.HandleFunc("/api/menu/screenshot/take", agent.AuthMiddleware(agent.HandleTakeScreenshot))
 	mux.HandleFunc("/api/menu/system/reload", agent.AuthMiddleware(agent.HandleSystemReload))
 	mux.HandleFunc("/api/menu/system/reboot", agent.AuthMiddleware(agent.HandleSystemReboot))
 	mux.HandleFunc("/api/menu/system/shutdown", agent.AuthMiddleware(agent.HandleSystemShutdown))
@@ -122,11 +140,11 @@ func main() {
 	signal.Notify(sigs, syscall.SIGHUP)
 	go func() {
 		for range sigs {
-			log.Printf("received SIGHUP, reloading configuration")
+			log.Printf("Received SIGHUP, reloading configuration")
 			if err := agent.ReloadConfig(); err != nil {
-				log.Printf("reload failed: %v", err)
+				log.Printf("Reload failed: %v", err)
 			} else {
-				log.Printf("configuration reloaded")
+				log.Printf("Configuration reloaded")
 			}
 		}
 	}()

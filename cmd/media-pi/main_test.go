@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -223,6 +224,66 @@ func TestSetupConfig(t *testing.T) {
 
 		if cfg.CoreAPIBase != "https://example.env:9999" {
 			t.Fatalf("expected core_api_base from env, got %q", cfg.CoreAPIBase)
+		}
+	})
+}
+
+func TestIsSystemdServiceRun(t *testing.T) {
+	t.Run("returns false without systemd markers", func(t *testing.T) {
+		t.Setenv("INVOCATION_ID", "")
+		t.Setenv("JOURNAL_STREAM", "")
+
+		if isSystemdServiceRun() {
+			t.Fatalf("expected false when no systemd env vars are set")
+		}
+	})
+
+	t.Run("returns true with INVOCATION_ID", func(t *testing.T) {
+		t.Setenv("INVOCATION_ID", "abc123")
+		t.Setenv("JOURNAL_STREAM", "")
+
+		if !isSystemdServiceRun() {
+			t.Fatalf("expected true when INVOCATION_ID is set")
+		}
+	})
+
+	t.Run("returns true with JOURNAL_STREAM", func(t *testing.T) {
+		t.Setenv("INVOCATION_ID", "")
+		t.Setenv("JOURNAL_STREAM", "8:12345")
+
+		if !isSystemdServiceRun() {
+			t.Fatalf("expected true when JOURNAL_STREAM is set")
+		}
+	})
+}
+
+func TestConfigureLoggingOutput(t *testing.T) {
+	origWriter := log.Writer()
+	origFlags := log.Flags()
+	defer func() {
+		log.SetOutput(origWriter)
+		log.SetFlags(origFlags)
+	}()
+
+	t.Run("uses stdout for application runs", func(t *testing.T) {
+		t.Setenv("INVOCATION_ID", "")
+		t.Setenv("JOURNAL_STREAM", "")
+
+		configureLogging()
+
+		if log.Writer() != os.Stdout {
+			t.Fatalf("expected logger output to stdout for app runs")
+		}
+	})
+
+	t.Run("uses stderr for systemd service runs", func(t *testing.T) {
+		t.Setenv("INVOCATION_ID", "svc")
+		t.Setenv("JOURNAL_STREAM", "")
+
+		configureLogging()
+
+		if log.Writer() != os.Stderr {
+			t.Fatalf("expected logger output to stderr for systemd service runs")
 		}
 	})
 }

@@ -127,7 +127,7 @@ Section: admin
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: Maxim Samsonov <maxirmx@sw.consulting>
-Depends: dbus, policykit-1, systemd, curl, jq
+Depends: dbus, policykit-1, systemd, curl, jq, ffmpeg
 Description: Media Pi Agent REST Service for Raspberry Pi
  Provides REST API to manage whitelisted systemd units via HTTP endpoints.
  Includes authentication and runs as a systemd service.
