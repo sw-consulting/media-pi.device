@@ -746,6 +746,9 @@ func schedulerLoop() {
 
 func captureScreenshot() error {
 	cfg := GetCurrentConfig()
+	if cfg.Screenshot.IntervalMinutes <= 0 {
+		return nil
+	}
 	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
 	if pathTemplate == "" {
 		return fmt.Errorf("screenshot path template not configured")

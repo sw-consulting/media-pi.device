@@ -828,6 +828,7 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
 			PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
 		},
 	}
@@ -866,7 +867,8 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			PathTemplate: "   ",
+			IntervalMinutes: 30,
+			PathTemplate:    "   ",
 		},
 	}
 	configMutex.Unlock()
@@ -878,5 +880,39 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 
 	if err := captureScreenshot(); err == nil {
 		t.Fatalf("expected error when screenshot template is empty")
+	}
+}
+
+func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 0,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalRunner := runScreenshotCommand
+	called := false
+	runScreenshotCommand = func(pathTemplate string) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCommand = originalRunner
+	})
+
+	if err := captureScreenshot(); err != nil {
+		t.Fatalf("captureScreenshot() returned error: %v", err)
+	}
+	if called {
+		t.Fatalf("expected screenshot command runner to not be called when interval is zero")
 	}
 }
