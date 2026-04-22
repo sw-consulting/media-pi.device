@@ -131,6 +131,9 @@ var (
 // listen address for the HTTP API.
 const DefaultListenAddr = "0.0.0.0:8081"
 
+// DefaultScreenshotPathTemplate is used when screenshot path template is not configured.
+const DefaultScreenshotPathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+
 // Version can be set at build time with -ldflags
 var Version = "unknown"
 
@@ -165,7 +168,7 @@ func DefaultConfig() Config {
 			Destination: "/var/media-pi",
 		},
 		Screenshot: ScreenshotConfig{
-			PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			PathTemplate: DefaultScreenshotPathTemplate,
 		},
 	}
 }
@@ -215,7 +218,7 @@ func LoadConfigFrom(path string) (*Config, error) {
 
 	// Set default screenshot path template if not specified.
 	if strings.TrimSpace(c.Screenshot.PathTemplate) == "" {
-		c.Screenshot.PathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+		c.Screenshot.PathTemplate = DefaultScreenshotPathTemplate
 	}
 
 	// Set global variables before migration (which may need them)
