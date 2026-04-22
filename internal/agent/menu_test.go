@@ -644,6 +644,70 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	}
 }
 
+func TestHandleConfigurationUpdatePreservesScreenshotIntervalWhenOmitted(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /old/src /old/dst"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Source: "media-pi.core server", Destination: "/mnt/usb"},
+		Schedule:   ScheduleConfig{Playlist: []string{"08:00"}, Video: []string{"12:00"}},
+		Audio:      AudioConfig{Output: "hdmi"},
+		Screenshot: ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/tmp/cam.jpg", Input: "/dev/video0"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	CrontabWriteFunc = func(string) error { return nil }
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	body := `{"playlist":{"source":"media-pi.core server","destination":"/mnt/usb/test/"},"schedule":{"playlist":["09:00"],"video":["13:00"],"rest":[]},"audio":{"output":"jack"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
+		t.Fatalf("expected screenshot interval to remain 15, got %d", cfg.Screenshot.IntervalMinutes)
+	}
+}
+
 func TestHandleSystemReloadMethodNotAllowed(t *testing.T) {
 	ServerKey = "test-key"
 

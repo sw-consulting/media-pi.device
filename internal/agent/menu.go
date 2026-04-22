@@ -214,6 +214,15 @@ type ConfigurationSettings struct {
 	Screenshot ScreenshotSettings   `json:"screenshot"`
 }
 
+// configurationUpdateRequest mirrors ConfigurationSettings but keeps Screenshot as a pointer
+// to preserve backwards compatibility with clients that omit the screenshot object.
+type configurationUpdateRequest struct {
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot *ScreenshotSettings  `json:"screenshot,omitempty"`
+}
+
 // ServiceStatusResponse describes the service status returned by the
 // service-status endpoint.
 type ServiceStatusResponse struct {
@@ -612,7 +621,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req ConfigurationSettings
+	var req configurationUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON в теле запроса"})
 		return
@@ -649,7 +658,11 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
 		return
 	}
-	if req.Screenshot.IntervalMinutes < 0 {
+	screenshotIntervalMinutes := GetCurrentConfig().Screenshot.IntervalMinutes
+	if req.Screenshot != nil {
+		screenshotIntervalMinutes = req.Screenshot.IntervalMinutes
+	}
+	if screenshotIntervalMinutes < 0 {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "screenshot.interval_minutes не может быть отрицательным"})
 		return
 	}
@@ -706,7 +719,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
 		ScreenshotConfig{
-			IntervalMinutes: req.Screenshot.IntervalMinutes,
+			IntervalMinutes: screenshotIntervalMinutes,
 			PathTemplate:    GetCurrentConfig().Screenshot.PathTemplate,
 			Input:           GetCurrentConfig().Screenshot.Input,
 		},
