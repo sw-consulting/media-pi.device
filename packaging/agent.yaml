@@ -29,4 +29,5 @@ playlist:
 # Screenshot configuration
 screenshot:
   interval_minutes: 0
+  input: "/dev/video0"
   path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"

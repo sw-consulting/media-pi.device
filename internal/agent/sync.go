@@ -25,8 +25,8 @@ import (
 var (
 	syncStatusFilePath   = "/var/media-pi/sync/sync-status.json"
 	runScreenshotCapture = captureScreenshot
-	runScreenshotCommand = func(outputPath string) error {
-		cmd := exec.Command("/usr/bin/ffmpeg", "-loglevel", "error", "-y", "-frames:v", "1", outputPath)
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		cmd := exec.Command("/usr/bin/ffmpeg", "-loglevel", "error", "-y", "-i", inputPath, "-frames:v", "1", outputPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
 		}
@@ -754,7 +754,11 @@ func captureScreenshot() error {
 	if pathTemplate == "" {
 		return fmt.Errorf("screenshot path template not configured")
 	}
-	return runScreenshotCommand(renderScreenshotOutputPath(pathTemplate, screenshotNow()))
+	input := strings.TrimSpace(cfg.Screenshot.Input)
+	if input == "" {
+		return fmt.Errorf("screenshot input is not configured")
+	}
+	return runScreenshotCommand(input, renderScreenshotOutputPath(pathTemplate, screenshotNow()))
 }
 
 func renderScreenshotOutputPath(pathTemplate string, now time.Time) string {

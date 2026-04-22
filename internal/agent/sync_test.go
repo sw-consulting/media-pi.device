@@ -829,7 +829,8 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 30,
-			PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:           "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -842,9 +843,11 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	originalRunner := runScreenshotCommand
 	originalNow := screenshotNow
 	called := false
+	var gotInput string
 	var gotPath string
-	runScreenshotCommand = func(outputPath string) error {
+	runScreenshotCommand = func(inputPath, outputPath string) error {
 		called = true
+		gotInput = inputPath
 		gotPath = outputPath
 		return nil
 	}
@@ -862,6 +865,9 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	if !called {
 		t.Fatalf("expected screenshot command runner to be called")
 	}
+	if gotInput != "/dev/video0" {
+		t.Fatalf("unexpected input path: %q", gotInput)
+	}
 	if gotPath != "/home/pi/Pictures/cam_2026-04-22_09-31-47.jpg" {
 		t.Fatalf("unexpected output path: %q", gotPath)
 	}
@@ -874,6 +880,7 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 30,
 			PathTemplate:    "   ",
+			Input:           "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -895,6 +902,7 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 0,
 			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:           "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -906,7 +914,7 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 
 	originalRunner := runScreenshotCommand
 	called := false
-	runScreenshotCommand = func(outputPath string) error {
+	runScreenshotCommand = func(inputPath, outputPath string) error {
 		called = true
 		return nil
 	}
@@ -919,6 +927,28 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("expected screenshot command runner to not be called when interval is zero")
+	}
+}
+
+func TestCaptureScreenshotRequiresInput(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{
+			IntervalMinutes: 30,
+			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:           "   ",
+		},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	if err := captureScreenshot(); err == nil {
+		t.Fatalf("expected error when screenshot input is empty")
 	}
 }
 

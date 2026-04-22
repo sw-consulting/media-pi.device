@@ -708,6 +708,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		ScreenshotConfig{
 			IntervalMinutes: req.Screenshot.IntervalMinutes,
 			PathTemplate:    GetCurrentConfig().Screenshot.PathTemplate,
+			Input:           GetCurrentConfig().Screenshot.Input,
 		},
 	); err != nil {
 		log.Printf("Warning: Failed to update config file: %v", err)

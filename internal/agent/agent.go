@@ -54,6 +54,7 @@ type AudioConfig struct {
 type ScreenshotConfig struct {
 	IntervalMinutes int    `yaml:"interval_minutes,omitempty" json:"interval_minutes,omitempty"`
 	PathTemplate    string `yaml:"path_template,omitempty" json:"path_template,omitempty"`
+	Input           string `yaml:"input,omitempty" json:"input,omitempty"`
 }
 
 // Config represents the agent configuration file structure. It is loaded
@@ -134,6 +135,9 @@ const DefaultListenAddr = "0.0.0.0:8081"
 // DefaultScreenshotPathTemplate is used when screenshot path template is not configured.
 const DefaultScreenshotPathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
 
+// DefaultScreenshotInput is used when screenshot input source is not configured.
+const DefaultScreenshotInput = "/dev/video0"
+
 // Version can be set at build time with -ldflags
 var Version = "unknown"
 
@@ -169,6 +173,7 @@ func DefaultConfig() Config {
 		},
 		Screenshot: ScreenshotConfig{
 			PathTemplate: DefaultScreenshotPathTemplate,
+			Input:        DefaultScreenshotInput,
 		},
 	}
 }
@@ -219,6 +224,9 @@ func LoadConfigFrom(path string) (*Config, error) {
 	// Set default screenshot path template if not specified.
 	if strings.TrimSpace(c.Screenshot.PathTemplate) == "" {
 		c.Screenshot.PathTemplate = DefaultScreenshotPathTemplate
+	}
+	if strings.TrimSpace(c.Screenshot.Input) == "" {
+		c.Screenshot.Input = DefaultScreenshotInput
 	}
 
 	// Set global variables before migration (which may need them)

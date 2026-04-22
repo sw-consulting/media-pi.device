@@ -295,7 +295,7 @@ func TestUpdateConfigSettings(t *testing.T) {
 		PlaylistConfig{Source: "/new/src", Destination: "/new/dst"},
 		ScheduleConfig{Playlist: []string{"12:00"}, Video: []string{"18:00"}},
 		AudioConfig{Output: "analog"},
-		ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"},
+		ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg", Input: "/dev/video2"},
 	)
 	if err != nil {
 		t.Fatalf("UpdateConfigSettings failed: %v", err)
@@ -312,6 +312,9 @@ func TestUpdateConfigSettings(t *testing.T) {
 	if cfg.Screenshot.IntervalMinutes != 15 {
 		t.Errorf("expected screenshot interval 15, got %d", cfg.Screenshot.IntervalMinutes)
 	}
+	if cfg.Screenshot.Input != "/dev/video2" {
+		t.Errorf("expected screenshot input /dev/video2, got %q", cfg.Screenshot.Input)
+	}
 
 	// Verify file was created and can be loaded
 	loadedCfg, err := LoadConfigFrom(configPath)
@@ -326,6 +329,9 @@ func TestUpdateConfigSettings(t *testing.T) {
 	}
 	if loadedCfg.Screenshot.IntervalMinutes != 15 {
 		t.Errorf("saved config has wrong screenshot interval: %d", loadedCfg.Screenshot.IntervalMinutes)
+	}
+	if loadedCfg.Screenshot.Input != "/dev/video2" {
+		t.Errorf("saved config has wrong screenshot input: %q", loadedCfg.Screenshot.Input)
 	}
 }
 
