@@ -141,6 +141,15 @@ max_parallel_downloads: 3
 playlist:
   destination: "/var/media-pi"
 
+# Конфигурация скриншотов
+screenshot:
+  # Интервал в минутах (0 — отключено)
+  interval_minutes: 0
+  # Источник видеоустройства
+  input: "/dev/video0"
+  # Шаблон пути для выходного файла
+  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+
 # Расписание синхронизации
 schedule:
   # Времена синхронизации плейлиста (формат HH:MM)
@@ -243,6 +252,11 @@ max_parallel_downloads: 3
 playlist:
   destination: "/var/media-pi"
 
+screenshot:
+  interval_minutes: 0
+  input: "/dev/video0"
+  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+
 schedule:
   playlist:
     - "10:30"
@@ -270,6 +284,9 @@ audio:
 - `schedule.video` — времена автоматической синхронизации видео файлов (формат HH:MM)
 - `schedule.rest` — нерабочее время, когда воспроизведение останавливается
 - `audio.output` — выбор аудио выхода (`hdmi` или `jack`)
+- `screenshot.interval_minutes` — периодический захват скриншотов в минутах (`0` отключает захват)
+- `screenshot.input` — путь к видеоустройству для захвата (по умолчанию: `/dev/video0`)
+- `screenshot.path_template` — шаблон пути сохранения скриншота (по умолчанию: `/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg`)
 
 ## Устранение неполадок
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 sw.consulting
+// Copyright (C) 2025-2026 sw.consulting
 // This file is a part of Media Pi device agent
 
 package agent
@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,7 +23,16 @@ import (
 )
 
 var (
-	syncStatusFilePath = "/var/media-pi/sync/sync-status.json"
+	syncStatusFilePath   = "/var/media-pi/sync/sync-status.json"
+	runScreenshotCapture = captureScreenshot
+	runScreenshotCommand = func(inputPath, outputPath string) error {
+		cmd := exec.Command("/usr/bin/ffmpeg", "-loglevel", "error", "-y", "-i", inputPath, "-frames:v", "1", outputPath)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	screenshotNow = time.Now
 )
 
 // ManifestItem represents a single file in the sync manifest.
@@ -709,6 +719,21 @@ func schedulerLoop() {
 			}
 		}
 
+		// Add periodic screenshot capture task.
+		if config.Screenshot.IntervalMinutes > 0 {
+			cronSpec := fmt.Sprintf("@every %dm", config.Screenshot.IntervalMinutes)
+			cronSchedulerLock.Lock()
+			_, err := cronScheduler.AddFunc(cronSpec, func() {
+				if err := runScreenshotCapture(); err != nil {
+					log.Printf("Failed to capture screenshot: %v", err)
+				}
+			})
+			cronSchedulerLock.Unlock()
+			if err != nil {
+				log.Printf("Warning: Failed to schedule screenshot capture every %d minutes: %v", config.Screenshot.IntervalMinutes, err)
+			}
+		}
+
 		// Start scheduler with lock protection
 		cronSchedulerLock.Lock()
 		cronScheduler.Start()
@@ -718,6 +743,27 @@ func schedulerLoop() {
 		<-syncReloadChan
 		log.Println("Reloading sync schedule")
 	}
+}
+
+func captureScreenshot() error {
+	cfg := GetCurrentConfig()
+	if cfg.Screenshot.IntervalMinutes <= 0 {
+		return nil
+	}
+	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
+	if pathTemplate == "" {
+		return fmt.Errorf("screenshot path template not configured")
+	}
+	input := strings.TrimSpace(cfg.Screenshot.Input)
+	if input == "" {
+		return fmt.Errorf("screenshot input is not configured")
+	}
+	return runScreenshotCommand(input, renderScreenshotOutputPath(pathTemplate, screenshotNow()))
+}
+
+func renderScreenshotOutputPath(pathTemplate string, now time.Time) string {
+	const dateToken = "$(date +%F_%H-%M-%S)"
+	return strings.ReplaceAll(pathTemplate, dateToken, now.Format("2006-01-02_15-04-05"))
 }
 
 // SetScheduledSyncCallback sets the callback to be called after successful scheduled syncs.

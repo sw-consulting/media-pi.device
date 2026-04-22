@@ -1,4 +1,4 @@
-# Copyright (c) 2025 sw.consulting
+# Copyright (C) 2025-2026 sw.consulting
 # This file is a part of Media Pi device agent
 
 allowed_units:
@@ -25,3 +25,9 @@ max_parallel_downloads: 3
 # Playlist configuration
 playlist:
   destination: "/var/media-pi"
+
+# Screenshot configuration
+screenshot:
+  interval_minutes: 0
+  input: "/dev/video0"
+  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
