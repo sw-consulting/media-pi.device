@@ -201,11 +201,26 @@ type AudioSettings struct {
 	Output string `json:"output"`
 }
 
-// ConfigurationSettings aggregates playlist upload configuration, schedule and audio output.
+// ScreenshotSettings describes periodic screenshot capture settings.
+type ScreenshotSettings struct {
+	IntervalMinutes int `json:"interval_minutes"`
+}
+
+// ConfigurationSettings aggregates playlist upload configuration, schedule, audio output, and screenshot capture settings.
 type ConfigurationSettings struct {
-	Playlist PlaylistUploadConfig `json:"playlist"`
-	Schedule ScheduleSettings     `json:"schedule"`
-	Audio    AudioSettings        `json:"audio"`
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot ScreenshotSettings   `json:"screenshot"`
+}
+
+// configurationUpdateRequest mirrors ConfigurationSettings but keeps Screenshot as a pointer
+// to preserve backwards compatibility with clients that omit the screenshot object.
+type configurationUpdateRequest struct {
+	Playlist   PlaylistUploadConfig `json:"playlist"`
+	Schedule   ScheduleSettings     `json:"schedule"`
+	Audio      AudioSettings        `json:"audio"`
+	Screenshot *ScreenshotSettings  `json:"screenshot,omitempty"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -594,6 +609,9 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 		Audio: AudioSettings{
 			Output: cfg.Audio.Output,
 		},
+		Screenshot: ScreenshotSettings{
+			IntervalMinutes: cfg.Screenshot.IntervalMinutes,
+		},
 	}})
 }
 
@@ -603,7 +621,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req ConfigurationSettings
+	var req configurationUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный JSON в теле запроса"})
 		return
@@ -638,6 +656,14 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateAudioOutput(req.Audio.Output); err != nil {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+		return
+	}
+	screenshotIntervalMinutes := GetCurrentConfig().Screenshot.IntervalMinutes
+	if req.Screenshot != nil {
+		screenshotIntervalMinutes = req.Screenshot.IntervalMinutes
+	}
+	if screenshotIntervalMinutes < 0 {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "screenshot.interval_minutes не может быть отрицательным"})
 		return
 	}
 
@@ -692,6 +718,11 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
+		ScreenshotConfig{
+			IntervalMinutes: screenshotIntervalMinutes,
+			PathTemplate:    GetCurrentConfig().Screenshot.PathTemplate,
+			Input:           GetCurrentConfig().Screenshot.Input,
+		},
 	); err != nil {
 		log.Printf("Warning: Failed to update config file: %v", err)
 	}
