@@ -62,6 +62,10 @@ func main() {
 		log.Fatalf("Failed to start scheduler: %v", err)
 	}
 
+	if err := agent.EnsurePlaybackStateOnStartup(); err != nil {
+		log.Printf("Warning: Failed to ensure playback startup state: %v", err)
+	}
+
 	// Set callback to restart play.video service after scheduled playlist syncs
 	agent.SetScheduledSyncCallback(func() {
 		log.Println("Scheduled sync completed, restarting play.video service")
