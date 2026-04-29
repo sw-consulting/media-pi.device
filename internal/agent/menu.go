@@ -69,6 +69,7 @@ var (
 	CrontabReadFunc  = defaultCrontabRead
 	CrontabWriteFunc = defaultCrontabWrite
 	cronParser       = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	playbackTimeNow  = time.Now
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -288,37 +289,10 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{
-			OK:     false,
-			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
-		})
-		return
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	_, err = conn.StartUnitContext(ctx, "play.video.service", "replace", ch)
-	if err != nil {
+	if err := startPlaybackService(context.Background()); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось запустить воспроизведение: %v", err),
-		})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-		// Successfully received result from D-Bus
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusRequestTimeout, APIResponse{
-			OK:     false,
-			ErrMsg: "Таймаут запуска воспроизведения",
 		})
 		return
 	}
@@ -327,10 +301,94 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		OK: true,
 		Data: MenuActionResponse{
 			Action:  "playback-start",
-			Result:  result,
+			Result:  "done",
 			Message: "Воспроизведение запущено",
 		},
 	})
+}
+
+// EnsurePlaybackStateOnStartup starts play.video.service when the current time
+// is outside configured rest intervals. Inside a rest interval the service is
+// intentionally left stopped.
+func EnsurePlaybackStateOnStartup() error {
+	return ensurePlaybackStateOnStartupAt(playbackTimeNow())
+}
+
+func ensurePlaybackStateOnStartupAt(now time.Time) error {
+	if isWithinConfiguredRestInterval(now, GetCurrentConfig().Schedule.Rest) {
+		log.Printf("Skipping startup playback start at %s because current time is within a rest interval", now.Format("15:04"))
+		return nil
+	}
+
+	if err := startPlaybackService(context.Background()); err != nil {
+		return fmt.Errorf("start play.video.service on startup: %w", err)
+	}
+
+	log.Printf("Started play.video.service on startup")
+	return nil
+}
+
+func isWithinConfiguredRestInterval(now time.Time, pairs []RestTimePairConfig) bool {
+	if len(pairs) == 0 {
+		return false
+	}
+
+	currentMinute := now.Hour()*60 + now.Minute()
+	for _, pair := range pairs {
+		startHour, startMinute, err := parseTimeValue(pair.Start)
+		if err != nil {
+			log.Printf("Warning: ignoring invalid rest start time %q: %v", pair.Start, err)
+			continue
+		}
+		stopHour, stopMinute, err := parseTimeValue(pair.Stop)
+		if err != nil {
+			log.Printf("Warning: ignoring invalid rest stop time %q: %v", pair.Stop, err)
+			continue
+		}
+
+		start := startHour*60 + startMinute
+		stop := stopHour*60 + stopMinute
+
+		if start < stop {
+			if currentMinute >= start && currentMinute < stop {
+				return true
+			}
+			continue
+		}
+
+		if start > stop && (currentMinute >= start || currentMinute < stop) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func startPlaybackService(parent context.Context) error {
+	conn, err := getDBusConnection(parent)
+	if err != nil {
+		return fmt.Errorf("подключиться к D-Bus: %w", err)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 1)
+	_, err = conn.StartUnitContext(ctx, "play.video.service", "replace", ch)
+	if err != nil {
+		return err
+	}
+
+	select {
+	case result := <-ch:
+		if result != "done" {
+			return fmt.Errorf("unexpected start result: %s", result)
+		}
+		return nil
+	case <-ctx.Done():
+		return errors.New("таймаут запуска воспроизведения")
+	}
 }
 
 // isPathMounted checks whether the given path appears in /proc/mounts.
