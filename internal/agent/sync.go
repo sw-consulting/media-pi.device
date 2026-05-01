@@ -675,10 +675,25 @@ func StartScheduler() error {
 	cronScheduler = cron.New()
 	cronSchedulerLock.Unlock()
 
+	triggerStartupScreenshotCapture()
+
 	// Start scheduler goroutine
 	go schedulerLoop()
 
 	return nil
+}
+
+func triggerStartupScreenshotCapture() {
+	cfg := GetCurrentConfig()
+	if cfg.Screenshot.IntervalMinutes <= 0 {
+		return
+	}
+
+	go func() {
+		if err := runScreenshotCapture(); err != nil {
+			log.Printf("Failed to capture startup screenshot: %v", err)
+		}
+	}()
 }
 
 // schedulerLoop manages scheduled sync operations.
