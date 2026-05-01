@@ -911,6 +911,72 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	}
 }
 
+func TestTriggerStartupScreenshotCapture_RunsWhenEnabled(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{IntervalMinutes: 30},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCapture = originalCapture
+	})
+
+	triggerStartupScreenshotCapture()
+
+	select {
+	case <-called:
+		// expected
+	case <-time.After(1 * time.Second):
+		t.Fatalf("expected startup screenshot capture to run")
+	}
+}
+
+func TestTriggerStartupScreenshotCapture_SkipsWhenDisabled(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{IntervalMinutes: 0},
+	}
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+	})
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCapture = originalCapture
+	})
+
+	triggerStartupScreenshotCapture()
+
+	select {
+	case <-called:
+		t.Fatalf("did not expect startup screenshot capture to run when interval is disabled")
+	case <-time.After(150 * time.Millisecond):
+		// expected
+	}
+}
+
 func TestCaptureScreenshotKeepsFileWhenUploadFails(t *testing.T) {
 	tmp := t.TempDir()
 	picturesDir := filepath.Join(tmp, "Pictures")
