@@ -196,10 +196,9 @@ ensure_media_pi_group() {
 }
 
 grant_media_pi_group_access() {
+    # Grant group read/write access to data and config directories only
     for path in \
         /etc/media-pi-agent \
-        /etc/systemd/system/media-pi-agent.service \
-        /etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla \
         /opt/media-pi \
         /opt/media-pi-agent \
         /var/media-pi
@@ -208,6 +207,16 @@ grant_media_pi_group_access() {
             chgrp -R media-pi "$path" 2>/dev/null || true
             chmod -R g+rwX "$path" 2>/dev/null || true
             find "$path" -type d -exec chmod g+s {} + 2>/dev/null || true
+        fi
+    done
+    # Grant group read-only access to privileged system/authorization files
+    for path in \
+        /etc/systemd/system/media-pi-agent.service \
+        /etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla
+    do
+        if [ -e "$path" ]; then
+            chgrp media-pi "$path" 2>/dev/null || true
+            chmod g+r,g-w "$path" 2>/dev/null || true
         fi
     done
 }

@@ -40,7 +40,7 @@ sudo apt-get install -f -y
 
 Пакет устанавливает бинарник, systemd unit, конфигурацию, polkit-правило и зависимости: `dbus`, `policykit-1`, `systemd`, `curl`, `jq`, `ffmpeg`.
 
-Пакет создает системную группу `media-pi` и выдает ей read/write-доступ к ресурсам Media Pi под `/etc`, `/opt` и `/var`: `/etc/media-pi-agent`, `/etc/systemd/system/media-pi-agent.service`, `/etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla`, `/opt/media-pi`, `/opt/media-pi-agent` и `/var/media-pi`, если эти пути существуют. Пользователь `pi` добавляется в группу `media-pi`, если он есть в системе.
+Пакет создает системную группу `media-pi` и выдает ей read/write-доступ к каталогам данных и конфигурации: `/etc/media-pi-agent`, `/opt/media-pi`, `/opt/media-pi-agent` и `/var/media-pi`, если эти пути существуют. Привилегированные системные файлы `/etc/systemd/system/media-pi-agent.service` и `/etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla` остаются под управлением `root` и доступны группе `media-pi` только на чтение. Пользователь `pi` добавляется в группу `media-pi`, если он есть в системе.
 
 3. Настройте и зарегистрируйте устройство:
 
@@ -54,7 +54,7 @@ sudo -E setup-media-pi.sh
 Скрипт:
 
 - генерирует `/etc/media-pi-agent/agent.yaml` и новый `server_key`;
-- создает группу `media-pi`, добавляет в нее пользователя `pi`, если он есть, и восстанавливает group read/write-доступ к ресурсам Media Pi;
+- создает группу `media-pi`, добавляет в нее пользователя `pi`, если он есть, и восстанавливает group read/write-доступ к каталогам данных и конфигурации Media Pi (системные файлы `/etc/systemd` и `/etc/polkit-1` доступны группе только на чтение);
 - регистрирует устройство в `${CORE_API_BASE}/api/devices/register`;
 - best-effort отключает `motion.service`, если он установлен;
 - включает и запускает `media-pi-agent.service`;
