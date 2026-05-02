@@ -312,7 +312,7 @@ func TestHandleConfigurationGet(t *testing.T) {
 		},
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 30,
-			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
 		},
 	}
 

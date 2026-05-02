@@ -1181,7 +1181,7 @@ func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 0,
-			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
 			Input:           "/dev/video0",
 		},
 	}
@@ -1216,7 +1216,7 @@ func TestCaptureScreenshotRequiresInput(t *testing.T) {
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
 			IntervalMinutes: 30,
-			PathTemplate:    "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg",
+			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
 			Input:           "   ",
 		},
 	}
@@ -1234,13 +1234,13 @@ func TestCaptureScreenshotRequiresInput(t *testing.T) {
 
 func TestRenderScreenshotOutputPath(t *testing.T) {
 	now := time.Date(2026, time.April, 22, 9, 31, 47, 0, time.UTC)
-	got := renderScreenshotOutputPath("/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg", now)
-	if got != "/home/pi/Pictures/cam_2026-04-22_09-31-47.jpg" {
+	got := renderScreenshotOutputPath("/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg", now)
+	if got != "/var/media-pi/screenshots/cam_2026-04-22_09-31-47.jpg" {
 		t.Fatalf("unexpected rendered path: %q", got)
 	}
 
-	plain := renderScreenshotOutputPath("/home/pi/Pictures/cam.jpg", now)
-	if plain != "/home/pi/Pictures/cam.jpg" {
+	plain := renderScreenshotOutputPath("/var/media-pi/screenshots/cam.jpg", now)
+	if plain != "/var/media-pi/screenshots/cam.jpg" {
 		t.Fatalf("path without token should be unchanged, got: %q", plain)
 	}
 }

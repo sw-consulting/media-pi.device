@@ -134,7 +134,7 @@ var (
 const DefaultListenAddr = "0.0.0.0:8081"
 
 // DefaultScreenshotPathTemplate is used when screenshot path template is not configured.
-const DefaultScreenshotPathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+const DefaultScreenshotPathTemplate = "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg"
 
 // DefaultScreenshotInput is used when screenshot input source is not configured.
 const DefaultScreenshotInput = "/dev/video0"

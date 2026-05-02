@@ -295,7 +295,7 @@ func TestUpdateConfigSettings(t *testing.T) {
 		PlaylistConfig{Source: "/new/src", Destination: "/new/dst"},
 		ScheduleConfig{Playlist: []string{"12:00"}, Video: []string{"18:00"}},
 		AudioConfig{Output: "analog"},
-		ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg", Input: "/dev/video2"},
+		ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg", Input: "/dev/video2"},
 	)
 	if err != nil {
 		t.Fatalf("UpdateConfigSettings failed: %v", err)

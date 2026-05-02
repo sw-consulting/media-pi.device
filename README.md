@@ -40,6 +40,8 @@ sudo apt-get install -f -y
 
 Пакет устанавливает бинарник, systemd unit, конфигурацию, polkit-правило и зависимости: `dbus`, `policykit-1`, `systemd`, `curl`, `jq`, `ffmpeg`.
 
+Пакет создает системную группу `media-pi` и выдает ей read/write-доступ к ресурсам Media Pi под `/etc`, `/opt` и `/var`: `/etc/media-pi-agent`, `/etc/systemd/system/media-pi-agent.service`, `/etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla`, `/opt/media-pi`, `/opt/media-pi-agent` и `/var/media-pi`, если эти пути существуют. Пользователь `pi` добавляется в группу `media-pi`, если он есть в системе.
+
 3. Настройте и зарегистрируйте устройство:
 
 ```bash
@@ -52,9 +54,12 @@ sudo -E setup-media-pi.sh
 Скрипт:
 
 - генерирует `/etc/media-pi-agent/agent.yaml` и новый `server_key`;
+- создает группу `media-pi`, добавляет в нее пользователя `pi`, если он есть, и восстанавливает group read/write-доступ к ресурсам Media Pi;
 - регистрирует устройство в `${CORE_API_BASE}/api/devices/register`;
+- best-effort отключает `motion.service`, если он установлен;
 - включает и запускает `media-pi-agent.service`;
 - проверяет `/health`;
+- после загрузки и миграции конфигурации best-effort отключает старые `playlist.upload.service`, `playlist.upload.timer`, `video.upload.service` и `video.upload.timer`;
 - выполняет reload или restart службы для применения конфигурации.
 
 4. Проверьте службу:
@@ -73,6 +78,10 @@ sudo apt install ./media-pi-agent_<new-version>_<arch>.deb
 ```
 
 Файлы `/etc/media-pi-agent/agent.yaml`, `/etc/systemd/system/media-pi-agent.service` и polkit-конфигурация помечены как conffiles. Если они были изменены локально, `dpkg` может предложить сохранить текущую версию или заменить ее версией из пакета.
+
+При установке или обновлении пакет best-effort отключает `motion.service`, если он установлен.
+
+При обновлении старая группа `svc-ops` переименовывается в `media-pi`, если группа `media-pi` еще не существует. Если обе группы уже есть, участники `svc-ops` добавляются в `media-pi` best-effort.
 
 Перед обновлением можно сохранить резервную копию:
 
@@ -110,7 +119,7 @@ screenshot:
   interval_minutes: 0
   resend_limit: 5
   input: "/dev/video0"
-  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+  path_template: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg"
 
 schedule:
   playlist:
@@ -265,7 +274,7 @@ POST {core_api_base}/api/devicesync/screenshot
 - интервалы rest из crontab пользователя `media_pi_service_user`;
 - audio output из `/etc/asound.conf`.
 
-При upgrade пакет также best-effort отключает старые `playlist.upload.service`, `playlist.upload.timer`, `video.upload.service` и `video.upload.timer`.
+После миграции конфигурации setup-скрипт best-effort отключает старые `playlist.upload.service`, `playlist.upload.timer`, `video.upload.service` и `video.upload.timer`. Debian-пакет также best-effort отключает эти unit'ы при первичной установке и при обновлении, не удаляя unit-файлы, которые нужны для миграции.
 
 ## Разработка
 
