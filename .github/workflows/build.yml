@@ -3,6 +3,9 @@
 
 name: Build & Package Media Pi Agent
 
+permissions:
+  contents: read
+
 concurrency:
   group: '${{ github.workflow }}-${{ github.job }}-${{ github.head_ref || github.ref_name }}'
   cancel-in-progress: true    
