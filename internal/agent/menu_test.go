@@ -859,12 +859,13 @@ func TestHandleConfigurationUpdateDestinationValidation(t *testing.T) {
 		name        string
 		destination string
 		wantCode    int
+		wantErrMsg  string
 	}{
 		// Rejection cases
-		{name: "relative path", destination: "relative/path", wantCode: http.StatusBadRequest},
-		{name: "dot-dot component mid-path", destination: "/mnt/usb/../etc", wantCode: http.StatusBadRequest},
-		{name: "dot-dot component at start", destination: "/../etc/passwd", wantCode: http.StatusBadRequest},
-		{name: "only dot-dot", destination: "/mnt/../../etc", wantCode: http.StatusBadRequest},
+		{name: "relative path", destination: "relative/path", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "dot-dot component mid-path", destination: "/mnt/usb/../etc", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "dot-dot component at start", destination: "/../etc/passwd", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "only dot-dot", destination: "/mnt/../../etc", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
 		// Acceptance cases — must not be rejected by validation
 		{name: "valid absolute path", destination: "/mnt/usb", wantCode: http.StatusOK},
 		{name: "trailing slash is normalised", destination: "/mnt/usb/", wantCode: http.StatusOK},
@@ -927,6 +928,16 @@ func TestHandleConfigurationUpdateDestinationValidation(t *testing.T) {
 			if w.Code != tc.wantCode {
 				t.Errorf("destination %q: expected HTTP %d, got %d (body: %s)",
 					tc.destination, tc.wantCode, w.Code, w.Body.String())
+			}
+			if tc.wantErrMsg != "" {
+				var resp APIResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if resp.ErrMsg != tc.wantErrMsg {
+					t.Errorf("destination %q: expected error message %q, got %q",
+						tc.destination, tc.wantErrMsg, resp.ErrMsg)
+				}
 			}
 		})
 	}
@@ -998,9 +1009,7 @@ func TestHandleConfigurationUpdateDestinationNormalised(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read updated service file: %v", err)
 	}
-	if !strings.Contains(string(updatedService), "/src/ /mnt/usb/data\n") &&
-		!strings.Contains(string(updatedService), "/src/ /mnt/usb/data ") &&
-		!strings.HasSuffix(strings.TrimSpace(string(updatedService)), "/src/ /mnt/usb/data") {
+	if !strings.Contains(string(updatedService), "/src/ /mnt/usb/data") {
 		t.Errorf("expected service file to contain cleaned destination /mnt/usb/data (no trailing slash), got:\n%s", string(updatedService))
 	}
 	if strings.Contains(string(updatedService), "/mnt/usb/data/") {
