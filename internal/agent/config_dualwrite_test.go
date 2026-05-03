@@ -132,7 +132,7 @@ WantedBy = multi-user.target
 	if err != nil {
 		t.Fatalf("failed to read service file: %v", err)
 	}
-	if !strings.Contains(string(serviceData), "/new/src/") || !strings.Contains(string(serviceData), "/new/dst/") {
+	if !strings.Contains(string(serviceData), "/new/src/") || !strings.Contains(string(serviceData), "/new/dst") {
 		t.Errorf("service file not updated correctly: %s", string(serviceData))
 	}
 
@@ -167,7 +167,7 @@ WantedBy = multi-user.target
 	if cfg.Playlist.Source != "/new/src/" {
 		t.Errorf("config source not updated: %s", cfg.Playlist.Source)
 	}
-	if cfg.Playlist.Destination != "/new/dst/" {
+	if cfg.Playlist.Destination != "/new/dst" {
 		t.Errorf("config destination not updated: %s", cfg.Playlist.Destination)
 	}
 	if len(cfg.Schedule.Playlist) != 2 || cfg.Schedule.Playlist[0] != "11:30" {

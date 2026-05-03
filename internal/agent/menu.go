@@ -654,6 +654,20 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Поле destination обязательно"})
 		return
 	}
+	cleanDestination := filepath.Clean(playlistDestination)
+	if !filepath.IsAbs(cleanDestination) {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+		return
+	}
+	// Check each component of the original path for ".." traversal tokens.
+	// Checking components (not a substring) avoids false negatives after Clean resolves
+	// traversal (e.g. /a/../b → /b) and false positives on names like "..." or "..cache".
+	for _, component := range strings.Split(filepath.ToSlash(playlistDestination), "/") {
+		if component == ".." {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+			return
+		}
+	}
 
 	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный формат времени. Используйте HH:MM"})
@@ -699,7 +713,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, playlistDestination); err != nil {
+	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, cleanDestination); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err)})
 		return
 	}
@@ -732,7 +746,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := UpdateConfigSettings(
-		PlaylistConfig{Source: playlistSource, Destination: playlistDestination},
+		PlaylistConfig{Source: playlistSource, Destination: cleanDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
 		ScreenshotConfig{

@@ -524,7 +524,7 @@ WantedBy = multi-user.target
 		t.Fatalf("failed to read updated service file: %v", err)
 	}
 
-	if !strings.Contains(string(updatedService), "/mnt/ya.disk/playlist/test/ /mnt/usb/playlist/") {
+	if !strings.Contains(string(updatedService), "/mnt/ya.disk/playlist/test/ /mnt/usb/playlist") {
 		t.Fatalf("updated service file does not contain new paths: %s", string(updatedService))
 	}
 
@@ -720,7 +720,7 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 		t.Fatalf("failed to read updated service file: %v", err)
 	}
 
-	if !strings.Contains(string(updatedService), "media-pi.core server /mnt/usb/test/") {
+	if !strings.Contains(string(updatedService), "media-pi.core server /mnt/usb/test") {
 		t.Errorf("expected default source 'media-pi.core server' in service file, got: %s", string(updatedService))
 	}
 
@@ -919,6 +919,177 @@ func TestHandleConfigurationUploadRejectsInvalidRestIntervals(t *testing.T) {
 
 	if writeCalled {
 		t.Fatalf("crontab write should not be called on invalid data")
+	}
+}
+
+func TestHandleConfigurationUpdateDestinationValidation(t *testing.T) {
+	ServerKey = "test-key"
+
+	cases := []struct {
+		name        string
+		destination string
+		wantCode    int
+		wantErrMsg  string
+	}{
+		// Rejection cases
+		{name: "relative path", destination: "relative/path", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "dot-dot component mid-path", destination: "/mnt/usb/../etc", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "dot-dot component at start", destination: "/../etc/passwd", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		{name: "only dot-dot", destination: "/mnt/../../etc", wantCode: http.StatusBadRequest, wantErrMsg: "Недопустимый путь destination"},
+		// Acceptance cases — must not be rejected by validation
+		{name: "valid absolute path", destination: "/mnt/usb", wantCode: http.StatusOK},
+		{name: "trailing slash is normalised", destination: "/mnt/usb/", wantCode: http.StatusOK},
+		{name: "three-dot directory name", destination: "/mnt/.../data", wantCode: http.StatusOK},
+		{name: "dotdot-prefix directory name", destination: "/mnt/..cache/data", wantCode: http.StatusOK},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			servicePath := filepath.Join(tmp, "playlist.upload.service")
+			originalService := PlaylistServicePath
+			originalPlaylist := PlaylistTimerPath
+			originalVideo := VideoTimerPath
+			originalAudio := AudioConfigPath
+			originalCfgPath := ConfigPath
+			PlaylistServicePath = servicePath
+			PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+			VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+			AudioConfigPath = filepath.Join(tmp, "asound.conf")
+			ConfigPath = filepath.Join(tmp, "agent.yaml")
+			t.Cleanup(func() {
+				PlaylistServicePath = originalService
+				PlaylistTimerPath = originalPlaylist
+				VideoTimerPath = originalVideo
+				AudioConfigPath = originalAudio
+				ConfigPath = originalCfgPath
+			})
+
+			if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /a /b"), 0644); err != nil {
+				t.Fatalf("failed to seed service file: %v", err)
+			}
+
+			config := Config{
+				ServerKey:  "test-key",
+				ListenAddr: "0.0.0.0:8081",
+				Playlist:   PlaylistConfig{Destination: "/mnt/usb"},
+				Audio:      AudioConfig{Output: "hdmi"},
+			}
+			configMutex.Lock()
+			currentConfig = &config
+			configMutex.Unlock()
+
+			originalRead := CrontabReadFunc
+			originalWrite := CrontabWriteFunc
+			CrontabReadFunc = func() (string, error) { return "", nil }
+			CrontabWriteFunc = func(string) error { return nil }
+			t.Cleanup(func() {
+				CrontabReadFunc = originalRead
+				CrontabWriteFunc = originalWrite
+			})
+
+			body := `{"playlist":{"source":"src","destination":"` + tc.destination + `"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"}}`
+			req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer test-key")
+			w := httptest.NewRecorder()
+
+			HandleConfigurationUpdate(w, req)
+
+			if w.Code != tc.wantCode {
+				t.Errorf("destination %q: expected HTTP %d, got %d (body: %s)",
+					tc.destination, tc.wantCode, w.Code, w.Body.String())
+			}
+			if tc.wantErrMsg != "" {
+				var resp APIResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("failed to decode response: %v", err)
+				}
+				if resp.ErrMsg != tc.wantErrMsg {
+					t.Errorf("destination %q: expected error message %q, got %q",
+						tc.destination, tc.wantErrMsg, resp.ErrMsg)
+				}
+			}
+		})
+	}
+}
+
+// TestHandleConfigurationUpdateDestinationNormalised verifies that a trailing-slash
+// destination is written to the service file and agent.yaml using the canonical
+// (cleaned) path without the trailing slash.
+func TestHandleConfigurationUpdateDestinationNormalised(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /old/src /old/dst"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Destination: "/mnt/usb"},
+		Audio:      AudioConfig{Output: "hdmi"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	CrontabWriteFunc = func(string) error { return nil }
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	// Destination has a trailing slash — it should be stored and written without it.
+	body := `{"playlist":{"source":"/src/","destination":"/mnt/usb/data/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Service file must use the cleaned destination (no trailing slash).
+	updatedService, err := os.ReadFile(servicePath)
+	if err != nil {
+		t.Fatalf("failed to read updated service file: %v", err)
+	}
+	if !strings.Contains(string(updatedService), "/src/ /mnt/usb/data") {
+		t.Errorf("expected service file to contain cleaned destination /mnt/usb/data (no trailing slash), got:\n%s", string(updatedService))
+	}
+	if strings.Contains(string(updatedService), "/mnt/usb/data/") {
+		t.Errorf("service file must not contain destination with trailing slash, got:\n%s", string(updatedService))
+	}
+
+	// agent.yaml must also use the cleaned destination.
+	cfg := GetCurrentConfig()
+	if cfg.Playlist.Destination != "/mnt/usb/data" {
+		t.Errorf("expected config destination /mnt/usb/data, got %q", cfg.Playlist.Destination)
 	}
 }
 
