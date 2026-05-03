@@ -275,6 +275,49 @@ func TestHandleHealthIncludesServiceStatusWhenAuthorized(t *testing.T) {
 	}
 }
 
+func TestHandleHealthOmitsServiceStatusWhenUnauthorized(t *testing.T) {
+	originalKey := ServerKey
+	ServerKey = "test-key"
+	t.Cleanup(func() { ServerKey = originalKey })
+
+	tests := []struct {
+		name   string
+		setAuth func(req *http.Request)
+	}{
+		{"no auth header", func(req *http.Request) {}},
+		{"wrong token", func(req *http.Request) { req.Header.Set("Authorization", "Bearer wrong-token") }},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/health", nil)
+			tc.setAuth(req)
+			w := httptest.NewRecorder()
+
+			HandleHealth(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d", w.Code)
+			}
+
+			var resp struct {
+				OK   bool           `json:"ok"`
+				Data HealthResponse `json:"data"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to unmarshal response: %v", err)
+			}
+
+			if !resp.OK {
+				t.Fatalf("expected ok=true for unauthenticated /health request")
+			}
+			if resp.Data.ServiceStatus != nil {
+				t.Fatalf("expected serviceStatus to be omitted for unauthenticated /health request")
+			}
+		})
+	}
+}
+
 // noopDBusConnectionForStatus is a test helper that reports ActiveState=active
 // for play.video.service.
 type noopDBusConnectionForStatus struct{ noopDBusConnection }

@@ -531,20 +531,20 @@ func IsAllowed(unit string) error {
 // invokes the next handler when authentication succeeds.
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется заголовок Authorization"})
+		if ServerKey == "" {
+			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Сервер не настроен для аутентификации"})
 			return
 		}
 
-		if !strings.HasPrefix(auth, "Bearer ") {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется токен Bearer"})
-			return
-		}
-
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(token), []byte(ServerKey)) != 1 {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Недействительный токен"})
+		if !isAuthorizedRequest(r) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется заголовок Authorization"})
+			} else if !strings.HasPrefix(auth, "Bearer ") {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется токен Bearer"})
+			} else {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Недействительный токен"})
+			}
 			return
 		}
 
@@ -801,7 +801,7 @@ func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isAuthorizedRequest(r) {
-		serviceStatus, err := getServiceStatus(context.Background())
+		serviceStatus, err := getServiceStatus(r.Context())
 		if err != nil {
 			JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось получить статус сервисов: %v", err)})
 			return

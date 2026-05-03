@@ -447,7 +447,7 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := getServiceStatus(context.Background())
+	resp, err := getServiceStatus(r.Context())
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
 		return
