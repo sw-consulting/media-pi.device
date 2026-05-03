@@ -216,8 +216,9 @@ else
   exit 1
 fi
 
-# The running agent has loaded configuration by this point and migrated any
-# missing settings from old unit files. Disable the old upload units afterward.
+# The setup command has created the agent configuration by this point and
+# migrated any missing settings from old unit files when no existing agent
+# configuration was present. Disable the old upload units afterward.
 echo "Disabling old upload units if present..."
 for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
   disable_unit_if_present "$unit"

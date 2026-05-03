@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestMigrateConfigFromSystemd_AllSettings(t *testing.T) {
@@ -221,6 +223,129 @@ func TestMigrateConfigFromSystemd_HandlesErrors(t *testing.T) {
 	// Settings should remain empty
 	if cfg.Playlist.Source != "" {
 		t.Errorf("expected empty source, got %s", cfg.Playlist.Source)
+	}
+}
+
+func TestLoadConfigFrom_DoesNotMigrateExistingAgentConfig(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "agent.yaml")
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+
+	originalServicePath := PlaylistServicePath
+	PlaylistServicePath = servicePath
+	t.Cleanup(func() {
+		PlaylistServicePath = originalServicePath
+	})
+
+	serviceContent := `[Unit]
+Description = Rsync playlist upload service
+[Service]
+ExecStart = /usr/bin/rsync -czavP /mnt/old/src/ /mnt/old/dst/
+[Install]
+WantedBy = multi-user.target
+`
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+		t.Fatalf("failed to write service file: %v", err)
+	}
+
+	configContent := `allowed_units: []
+server_key: "existing-key"
+listen_addr: "0.0.0.0:8081"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfigFrom(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFrom() failed: %v", err)
+	}
+
+	if cfg.Playlist.Source != "" {
+		t.Fatalf("expected existing config load not to migrate playlist source, got %q", cfg.Playlist.Source)
+	}
+	if cfg.Playlist.Destination != "/var/media-pi" {
+		t.Fatalf("expected default playlist destination, got %q", cfg.Playlist.Destination)
+	}
+}
+
+func TestSetupConfig_MigratesOnlyWithoutExistingAgentConfig(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "agent.yaml")
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+
+	originalServicePath := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCrontabRead := CrontabReadFunc
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "missing-playlist.timer")
+	VideoTimerPath = filepath.Join(tmp, "missing-video.timer")
+	AudioConfigPath = filepath.Join(tmp, "missing-asound.conf")
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	t.Cleanup(func() {
+		PlaylistServicePath = originalServicePath
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		CrontabReadFunc = originalCrontabRead
+	})
+
+	serviceContent := `[Unit]
+Description = Rsync playlist upload service
+[Service]
+ExecStart = /usr/bin/rsync -czavP /mnt/old/src/ /mnt/old/dst/
+[Install]
+WantedBy = multi-user.target
+`
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+		t.Fatalf("failed to write service file: %v", err)
+	}
+
+	if err := SetupConfig(configPath); err != nil {
+		t.Fatalf("SetupConfig() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+
+	if cfg.Playlist.Source != "/mnt/old/src/" {
+		t.Fatalf("expected first setup to migrate playlist source, got %q", cfg.Playlist.Source)
+	}
+	if cfg.Playlist.Destination != "/mnt/old/dst/" {
+		t.Fatalf("expected first setup to migrate playlist destination, got %q", cfg.Playlist.Destination)
+	}
+
+	cfg.Playlist = PlaylistConfig{}
+	data, err = yaml.Marshal(&cfg)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatalf("failed to rewrite config: %v", err)
+	}
+
+	if err := SetupConfig(configPath); err != nil {
+		t.Fatalf("second SetupConfig() failed: %v", err)
+	}
+
+	data, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read updated config: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("failed to unmarshal updated config: %v", err)
+	}
+	if cfg.Playlist.Source != "" {
+		t.Fatalf("expected existing agent config setup not to migrate playlist source, got %q", cfg.Playlist.Source)
 	}
 }
 
