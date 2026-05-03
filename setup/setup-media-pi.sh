@@ -14,7 +14,82 @@ CORE_API_BASE="${CORE_API_BASE:-https://media-pi.sw.consulting:8086}"
 AGENT_CONFIG_PATH="/etc/media-pi-agent/agent.yaml"
 ### ---------------------------------------------
 
+ensure_media_pi_group() {
+  if getent group media-pi >/dev/null 2>&1; then
+    if getent group svc-ops >/dev/null 2>&1; then
+      members="$(getent group svc-ops | cut -d: -f4)"
+      if [[ -n "$members" ]]; then
+        old_ifs="$IFS"
+        IFS=","
+        for user in $members; do
+          [[ -n "$user" ]] && usermod -aG media-pi "$user" >/dev/null 2>&1 || true
+        done
+        IFS="$old_ifs"
+      fi
+    fi
+    return 0
+  fi
+
+  if getent group svc-ops >/dev/null 2>&1; then
+    if ! groupmod -n media-pi svc-ops >/dev/null 2>&1; then
+      echo "ERROR: Failed to rename group 'svc-ops' to 'media-pi'." >&2
+    fi
+  fi
+
+  if ! getent group media-pi >/dev/null 2>&1; then
+    if ! groupadd -r media-pi >/dev/null 2>&1; then
+      echo "ERROR: Failed to create group 'media-pi'." >&2
+    fi
+  fi
+
+  if ! getent group media-pi >/dev/null 2>&1; then
+    echo "ERROR: Required group 'media-pi' does not exist after setup attempt." >&2
+    return 1
+  fi
+}
+
+grant_media_pi_group_access() {
+  # Grant group read/write access to data and config directories only
+  for path in \
+    /etc/media-pi-agent \
+    /opt/media-pi \
+    /opt/media-pi-agent \
+    /var/media-pi
+  do
+    if [[ -e "$path" ]]; then
+      chgrp -R media-pi "$path" 2>/dev/null || true
+      chmod -R g+rwX "$path" 2>/dev/null || true
+      find "$path" -type d -exec chmod g+s {} + 2>/dev/null || true
+    fi
+  done
+  # Grant group read-only access to privileged system/authorization files
+  for path in \
+    /etc/systemd/system/media-pi-agent.service \
+    /etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla
+  do
+    if [[ -e "$path" ]]; then
+      chgrp media-pi "$path" 2>/dev/null || true
+      chmod g+r,g-w "$path" 2>/dev/null || true
+    fi
+  done
+}
+
+disable_unit_if_present() {
+  unit="$1"
+  if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+    systemctl disable "$unit" || true
+  fi
+  if systemctl is-active --quiet "$unit" 2>/dev/null; then
+    systemctl stop "$unit" || true
+  fi
+}
+
 echo "Setting up Media Pi Agent REST Service..."
+
+ensure_media_pi_group
+if id -u pi >/dev/null 2>&1; then
+  usermod -aG media-pi pi || true
+fi
 
 # Dependencies (curl, jq) are provided by package dependencies
 # Verify they are available
@@ -34,6 +109,7 @@ if ! media-pi-agent setup; then
   echo "Error: Failed to generate media-pi-agent configuration" >&2
   exit 1
 fi
+grant_media_pi_group_access
 
 # Extract server key from configuration
 if [[ ! -f "${AGENT_CONFIG_PATH}" ]]; then
@@ -66,6 +142,11 @@ echo "Device metadata:"
 echo "  Hostname: ${HOSTNAME}"
 echo "  IP Address: ${DEVICE_IP}"
 echo "  Agent Port: ${AGENT_PORT}"
+
+# Disable the default motion service if it is present. Media Pi controls
+# screenshots directly, so motion should not keep the camera device busy.
+echo "Disabling motion.service if present..."
+disable_unit_if_present motion.service
 
 # Register device with central server
 echo "Registering device at ${CORE_API_BASE}/api/devices/register ..."
@@ -147,6 +228,16 @@ else
   systemctl status media-pi-agent.service >&2
   exit 1
 fi
+
+# The setup command has created the agent configuration by this point and
+# migrated any missing settings from old unit files when no existing agent
+# configuration was present. Disable the old upload units afterward.
+echo "Disabling old upload units if present..."
+for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+  disable_unit_if_present "$unit"
+done
+systemctl daemon-reload || true
+grant_media_pi_group_access
 
 echo ""
 echo "Setup completed successfully!"

@@ -1,251 +1,112 @@
 # media-pi.device
-Media Pi Agent REST Service для управления systemd юнитами
 
-[![Build & Package Media Pi Agent REST Service](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml)
+Media Pi Agent REST Service для Raspberry Pi.
+
+[![Build & Package Media Pi Agent](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/build.yml)
 [![Lint](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml/badge.svg)](https://github.com/sw-consulting/media-pi.device/actions/workflows/lint.yml)
 [![codecov](https://codecov.io/gh/sw-consulting/media-pi.device/graph/badge.svg?token=VKjKQppeYE)](https://codecov.io/gh/sw-consulting/media-pi.device)
 
 ## Описание
 
-Media Pi Agent — это REST сервис для управления разрешёнными systemd юнитами через HTTP API. Сервис включает аутентификацию по ключу и работает как systemd служба.
+`media-pi-agent` - это HTTP-сервис для устройства Media Pi. Он запускается как systemd-служба и предоставляет API для:
+
+- управления разрешенными systemd-юнитами через D-Bus;
+- запуска и остановки воспроизведения `play.video.service`;
+- синхронизации плейлиста и медиафайлов с core API;
+- настройки расписаний синхронизации и нерабочего времени;
+- захвата и отправки фотографий с видеоустройства;
+- перезагрузки конфигурации, reboot и shutdown устройства.
+
+Все API-методы, кроме `/health`, требуют Bearer-токен из `server_key` в `/etc/media-pi-agent/agent.yaml`.
 
 ## Установка
 
-1) Скачайте дистрибутив программного обеспечения в `/home/pi/Downloads/media-pi-agent.deb`
+1. Скачайте пакет `media-pi-agent_<version>_<arch>.deb` из [GitHub Releases](https://github.com/sw-consulting/media-pi.device/releases) на устройство.
 
-   Опубликованные версии доступны в [релизах GitHub](https://github.com/sw-consulting/media-pi.device/releases)
-
-2) Установите пакет 
+2. Установите пакет:
 
 ```bash
 sudo apt-get update
-sudo apt install ./media-pi-agent.deb
+sudo apt install ./media-pi-agent_<version>_<arch>.deb
 ```
 
-либо
+Альтернативно:
 
 ```bash
-sudo dpkg -i /home/pi/Downloads/media-pi-agent.deb
-sudo apt-get update 
+sudo dpkg -i ./media-pi-agent_<version>_<arch>.deb
+sudo apt-get update
 sudo apt-get install -f -y
 ```
 
-Пакет автоматически установит все зависимости (curl, jq) и файлы сервиса. Сервис пока не запущен - это сделает следующий шаг.
+Пакет устанавливает бинарник, systemd unit, конфигурацию, polkit-правило и зависимости: `dbus`, `policykit-1`, `systemd`, `curl`, `jq`, `ffmpeg`.
 
-3) Настройте и запустите сервис
+Пакет создает системную группу `media-pi` и выдает ей read/write-доступ к каталогам данных и конфигурации: `/etc/media-pi-agent`, `/opt/media-pi`, `/opt/media-pi-agent` и `/var/media-pi`, если эти пути существуют. Привилегированные системные файлы `/etc/systemd/system/media-pi-agent.service` и `/etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla` остаются под управлением `root` и доступны группе `media-pi` только на чтение. Пользователь `pi` добавляется в группу `media-pi`, если он есть в системе.
+
+3. Настройте и зарегистрируйте устройство:
 
 ```bash
-# Установите URL сервера управления (обязательно!)
-export CORE_API_BASE="https://your-server.com"
-
-# Выполните настройку (создаст конфигурацию, зарегистрирует устройство и запустит сервис)
+export CORE_API_BASE="https://your-management-server.example"
 sudo -E setup-media-pi.sh
 ```
 
-**Важно:** Переменная `CORE_API_BASE` должна указывать на URL/port media-pi агента (контейнер media-pi.core).
+`CORE_API_BASE` должен указывать на URL media-pi core API. Если переменная не задана, setup-скрипт использует значение по умолчанию из `setup/setup-media-pi.sh`.
 
-### Обновление
+Скрипт:
 
-Для обновления до новой версии просто установите новую версию пакета - сервис будет автоматически остановлен, обновлен и перезапущен:
+- генерирует `/etc/media-pi-agent/agent.yaml` и новый `server_key`;
+- создает группу `media-pi`, добавляет в нее пользователя `pi`, если он есть, и восстанавливает group read/write-доступ к каталогам данных и конфигурации Media Pi (системные файлы `/etc/systemd` и `/etc/polkit-1` доступны группе только на чтение);
+- регистрирует устройство в `${CORE_API_BASE}/api/devices/register`;
+- best-effort отключает `motion.service`, если он установлен;
+- включает и запускает `media-pi-agent.service`;
+- проверяет `/health`;
+- после загрузки и миграции конфигурации best-effort отключает старые `playlist.upload.service`, `playlist.upload.timer`, `video.upload.service` и `video.upload.timer`;
+- выполняет reload или restart службы для применения конфигурации.
+
+4. Проверьте службу:
 
 ```bash
-sudo apt install ./media-pi-agent-new.deb
+sudo systemctl status media-pi-agent
+curl http://localhost:8081/health
 ```
 
-либо
+## Обновление
+
+Установите новый `.deb`. При upgrade пакет остановит службу перед заменой файлов и запустит ее обратно, если служба была включена:
 
 ```bash
-sudo dpkg -i /home/pi/Downloads/media-pi-agent-new.deb
-sudo apt-get update
-sudo apt-get install -f -y
+sudo apt install ./media-pi-agent_<new-version>_<arch>.deb
 ```
 
-Следует учесть, что файл `/etc/media-pi-agent/agent.yaml` помечен в пакете как файл конфигурации (conffile). При обновлении dpkg может спросить, оставить ли текущую локальную версию файла или заменить её новой версией из пакета. Вы можете сохранить сохранить резервную копию конфигурации перед обновлением:
+Файлы `/etc/media-pi-agent/agent.yaml`, `/etc/systemd/system/media-pi-agent.service` и polkit-конфигурация помечены как conffiles. Если они были изменены локально, `dpkg` может предложить сохранить текущую версию или заменить ее версией из пакета.
+
+При установке или обновлении пакет best-effort отключает `motion.service`, если он установлен.
+
+При обновлении старая группа `svc-ops` переименовывается в `media-pi`, если группа `media-pi` еще не существует. Если обе группы уже есть, участники `svc-ops` добавляются в `media-pi` best-effort.
+
+Перед обновлением можно сохранить резервную копию:
 
 ```bash
 sudo cp /etc/media-pi-agent/agent.yaml /root/agent.yaml.bak
 ```
 
-Скрипт `setup-media-pi.sh` предназначен для первоначальной настройки и регистрации устройства; его можно запускать вручную после обновления, если нужна повторная регистрация или инициализация.
-
-Скрипт `setup-media-pi.sh` предназначен для первоначальной настройки и регистрации устройства. Он выполняет следующте действия:
-- Создаёт конфигурацию с уникальным ключом сервера
-- Регистрирует устройство на сервере управления  
-- Запускает systemd сервис
-- Проверяет работоспособность API
-
-4) Проверьте статус сервиса (опционально)
-
-```bash
-sudo systemctl status media-pi-agent
-```
-
-## API Endpoints
-
-### Управление воспроизведением
-- `POST /api/menu/playback/stop` — остановить воспроизведение
-- `POST /api/menu/playback/start` — запустить воспроизведение
-
-### Синхронизация файлов
-- `POST /api/menu/playlist/start-upload` — запустить синхронизацию плейлиста
-- `POST /api/menu/playlist/stop-upload` — остановить синхронизацию плейлиста
-- `POST /api/menu/video/start-upload` — запустить синхронизацию видео файлов
-- `POST /api/menu/video/stop-upload` — остановить синхронизацию видео файлов
-
-**Примечание:** Начиная с версии 0.7.0, синхронизация файлов выполняется внутри агента, а не через отдельные systemd сервисы. Команды start-upload запускают немедленную синхронизацию, а stop-upload останавливают текущую операцию синхронизации.
-
-### Конфигурация
-- `GET /api/menu/configuration/get` — получить текущую конфигурацию (включая расписание синхронизации и нерабочее время)
-- `PUT /api/menu/configuration/update` — обновить конфигурацию
-
-### Системные операции
-- `GET /api/menu/service/status` — получить статус сервисов
-- `POST /api/menu/system/reload` — применить изменения (daemon-reload)
-- `POST /api/menu/system/reboot` — перезагрузка системы
-- `POST /api/menu/system/shutdown` — выключение системы
-
-## Синхронизация файлов
-
-### Обзор
-
-Начиная с версии 0.7.0, агент использует встроенный механизм синхронизации файлов вместо отдельных systemd сервисов. Синхронизация выполняется напрямую с сервером управления через REST API.
-
-### Как работает синхронизация
-
-1. **Получение манифеста** — агент запрашивает список файлов с сервера через `/api/devicesync`
-2. **Сравнение файлов** — локальные файлы сравниваются с манифестом по SHA256 и размеру
-3. **Загрузка файлов** — недостающие или устаревшие файлы загружаются через `/api/devicesync/{id}`
-4. **Проверка целостности** — каждый файл проверяется по SHA256 и размеру перед сохранением
-5. **Атомарная запись** — файлы сначала записываются во временный файл, затем переименовываются
-6. **Сборка мусора** — файлы, отсутствующие в манифесте, автоматически удаляются
-
-### Безопасность
-
-- Все запросы к серверу проходят аутентификацию через заголовок `X-Device-Id`
-- Проверка SHA256 хэша гарантирует целостность загруженных файлов
-- Защита от path traversal атак — недопустимые пути файлов отклоняются
-- Поддержка подкаталогов в именах файлов
-
-### Конфигурация синхронизации
-
-Параметры в `/etc/media-pi-agent/agent.yaml`:
-
-```yaml
-# Базовый URL API сервера управления
-core_api_base: "https://vezyn.fvds.ru"
-
-# Максимальное количество параллельных загрузок (зарезервировано для будущего использования)
-max_parallel_downloads: 3
-
-# Конфигурация плейлиста (директория для файлов определяется из destination)
-playlist:
-  destination: "/var/media-pi"
-
-# Конфигурация скриншотов
-screenshot:
-  # Интервал в минутах (0 — отключено)
-  interval_minutes: 0
-  # Сколько старых файлов скриншотов повторно отправлять за один цикл
-  resend_limit: 5
-  # Источник видеоустройства
-  input: "/dev/video0"
-  # Шаблон пути для выходного файла
-  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
-
-# Расписание синхронизации
-schedule:
-  # Времена синхронизации плейлиста (формат HH:MM)
-  playlist:
-    - "10:30"
-    - "14:45"
-  # Времена синхронизации видео (формат HH:MM)
-  video:
-    - "02:00"
-  # Нерабочее время (воспроизведение останавливается)
-  rest:
-    - start: "22:00"
-      stop: "08:00"
-```
-
-### Автоматическая синхронизация
-
-Синхронизация выполняется автоматически по расписанию, указанному в конфигурации:
-
-- **Плейлист** — синхронизируется в указанные времена, после чего перезапускается сервис воспроизведения
-- **Видео** — синхронизируются в указанные времена без перезапуска воспроизведения
-
-### Ручная синхронизация
-
-Вы можете запустить синхронизацию вручную через API:
-
-```bash
-# Синхронизация плейлиста (перезапустит воспроизведение)
-curl -X POST -H "Authorization: Bearer YOUR_KEY" http://localhost:8081/api/menu/playlist/start-upload
-
-# Синхронизация видео (не перезапускает воспроизведение)
-curl -X POST -H "Authorization: Bearer YOUR_KEY" http://localhost:8081/api/menu/video/start-upload
-
-# Остановка текущей синхронизации
-curl -X POST -H "Authorization: Bearer YOUR_KEY" http://localhost:8081/api/menu/playlist/stop-upload
-```
-
-### Статус синхронизации
-
-Статус последней синхронизации сохраняется в памяти и опционально в файле `/var/media-pi/sync/sync-status.json`:
-
-```json
-{
-  "lastSyncTime": "2026-02-27T15:30:00Z",
-  "ok": true,
-  "error": ""
-}
-```
-
-### Миграция с предыдущих версий
-
-При обновлении с версий 0.6.x:
-
-1. Старые systemd юниты `playlist.upload.service` и `video.upload.service` автоматически отключаются
-2. Расписание из старых юнитов мигрируется в `agent.yaml`
-3. API endpoints остаются без изменений — старые скрипты продолжат работать
-4. Настройки плейлиста автоматически переносятся в новый формат
-
-## Авторизация
-
-Все API endpoints (кроме `/health`) требуют авторизации через Bearer token:
-
-```bash
-curl -H "Authorization: Bearer YOUR_SERVER_KEY" http://localhost:8081/api/units
-```
+`setup-media-pi.sh` нужен для первичной настройки и повторной регистрации. После обычного обновления запускать его не требуется.
 
 ## Конфигурация
 
-### Переменные окружения
+Основной файл конфигурации: `/etc/media-pi-agent/agent.yaml`.
 
-Скрипт настройки `setup-media-pi.sh` поддерживает следующие переменные окружения:
+Для локальных тестов и нестандартного запуска путь можно переопределить переменной `MEDIA_PI_AGENT_CONFIG`.
 
-- `CORE_API_BASE` — URL API media-pi агента (обязательно для продакшена)
-  - По умолчанию: `https://media-pi.sw.consulting:8086`
-  - Пример: `https://your-management-server.com`
-
-Пример запуска с переменными окружения:
-
-```bash
-CORE_API_BASE="https://your-server.com" sudo -E setup-media-pi.sh
-```
-
-### Файл конфигурации
-
-Путь: `/etc/media-pi-agent/agent.yaml`
+Пример:
 
 ```yaml
 allowed_units:
-  - play.video.service
   - mnt-usb.mount
   - mnt-ya.disk.mount
   - mnt-ya.disk.automount
+  - play.video.service
 
-server_key: "auto-generated-key"
+server_key: "generated-key"
 listen_addr: "0.0.0.0:8081"
 media_pi_service_user: "pi"
 core_api_base: "https://vezyn.fvds.ru"
@@ -258,7 +119,7 @@ screenshot:
   interval_minutes: 0
   resend_limit: 5
   input: "/dev/video0"
-  path_template: "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+  path_template: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg"
 
 schedule:
   playlist:
@@ -274,110 +135,245 @@ audio:
   output: "hdmi"
 ```
 
-Параметры конфигурации:
+Параметры:
 
-- `allowed_units` — список разрешённых systemd сервисов для управления
-- `server_key` — ключ сервера, генерируется автоматически и используется для аутентификации API запросов
-- `listen_addr` — адрес и порт для HTTP API сервера (по умолчанию: `0.0.0.0:8081`)
-- `media_pi_service_user` — имя пользователя для операций с crontab и systemd таймерами (по умолчанию: `pi`)
-- `core_api_base` — базовый URL API сервера управления (по умолчанию: `https://vezyn.fvds.ru`)
-- `max_parallel_downloads` — максимальное количество параллельных загрузок (по умолчанию: 3, зарезервировано для будущего использования)
-- `playlist.destination` — директория для сохранения плейлиста (файл всегда называется `playlist.m3u`) и медиа файлов (по умолчанию: `/var/media-pi`)
-- `schedule.playlist` — времена автоматической синхронизации плейлиста (формат HH:MM)
-- `schedule.video` — времена автоматической синхронизации видео файлов (формат HH:MM)
-- `schedule.rest` — нерабочее время, когда воспроизведение останавливается
-- `audio.output` — выбор аудио выхода (`hdmi` или `jack`)
-- `screenshot.interval_minutes` — периодический захват скриншотов в минутах (`0` отключает захват)
-- `screenshot.input` — путь к видеоустройству для захвата (по умолчанию: `/dev/video0`)
-- `screenshot.path_template` — шаблон пути сохранения скриншота (по умолчанию: `/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg`)
+- `allowed_units` - systemd-юниты, которыми разрешено управлять через `/api/units/*`.
+- `server_key` - Bearer-токен для входящих API-запросов и идентификатор устройства для запросов к core API.
+- `listen_addr` - адрес HTTP-сервера, по умолчанию `0.0.0.0:8081`.
+- `media_pi_service_user` - пользователь для crontab-операций, по умолчанию `pi`.
+- `core_api_base` - базовый URL core API, используемый для регистрации, синхронизации и отправки фотографий.
+- `max_parallel_downloads` - зарезервировано для будущей параллельной загрузки, по умолчанию `3`.
+- `playlist.destination` - директория для `playlist.m3u` и медиафайлов, по умолчанию `/var/media-pi`.
+- `schedule.playlist` - времена загрузки плейлиста в формате `HH:MM`; после успешной плановой загрузки агент перезапускает `play.video.service`.
+- `schedule.video` - времена синхронизации медиафайлов в формате `HH:MM`.
+- `schedule.rest` - интервалы нерабочего времени; агент управляет остановкой и запуском `play.video.service`.
+- `audio.output` - аудиовыход, `hdmi` или `jack`.
+- `screenshot.interval_minutes` - интервал автоматического захвата фотографии; `0` отключает автоматический захват.
+- `screenshot.resend_limit` - сколько старых неотправленных фотографий повторно отправлять за один цикл.
+- `screenshot.input` - видеоустройство для `ffmpeg`, по умолчанию `/dev/video0`.
+- `screenshot.path_template` - шаблон локального пути для временного файла фотографии.
 
-> **Зависимость от ffmpeg:** функция захвата скриншотов использует `ffmpeg` для захвата кадра с устройства. Пакет `media-pi-agent` автоматически устанавливает `ffmpeg` как зависимость при установке через `apt`. При необходимости можно переопределить путь к бинарнику через переменную окружения `FFMPEG_PATH`.
+`ffmpeg` берется из `PATH`. При необходимости путь можно переопределить через `FFMPEG_PATH`.
 
-## Устранение неполадок
+## API
 
-### Проверка статуса сервиса
+Все ответы API, кроме файла фотографии, используют оболочку:
 
-```bash
-# Проверить статус сервиса
-sudo systemctl status media-pi-agent
-
-# Просмотреть логи
-sudo journalctl -u media-pi-agent -f
-
-# Проверить доступность API
-curl http://localhost:8081/health
+```json
+{
+  "ok": true,
+  "data": {}
+}
 ```
 
-### Проблемы с настройкой
-
-Если `setup-media-pi.sh` завершается с ошибкой:
-
-1. Убедитесь, что установлена переменная `CORE_API_BASE`:
-   ```bash
-   echo $CORE_API_BASE
-   ```
-
-2. Проверьте доступность сервера управления:
-   ```bash
-   curl -I "$CORE_API_BASE/api/status/status"
-   ```
-
-3. Проверьте права доступа к конфигурации:
-   ```bash
-   ls -la /etc/media-pi-agent/
-   ```
-
-### Проблемы с расписанием (crontab)
-
-Если расписание нерабочего времени отображается некорректно через API `/api/menu/configuration/get`:
-
-1. Проверьте, что параметр `media_pi_service_user` в конфигурации указывает на правильного пользователя:
-   ```bash
-   sudo cat /etc/media-pi-agent/agent.yaml | grep media_pi_service_user
-   ```
-
-2. Проверьте crontab указанного пользователя:
-   ```bash
-   sudo crontab -u pi -l  # заменить 'pi' на значение media_pi_service_user
-   ```
-
-3. Убедитесь, что media-pi агент имеет права на управление crontab указанного пользователя (обычно требуется запуск от root)
-
-## Удаление
-
-Для полного удаления сервиса:
+Авторизация:
 
 ```bash
-# Остановить и отключить сервис
-# (можно не делать, при удалении пакета dpkg/apt попытаются остановить и отключить службу)
-sudo systemctl stop media-pi-agent
-sudo systemctl disable media-pi-agent
-
-# Удалить пакет и опционально конфигурацию
-# `apt remove --purge` удалит пакет и файлы конфигурации, находящиеся в `/etc/media-pi-agent/`. 
-# Если вы хотите сохранить конфигурацию (например, для отладки или повторной установки),
-# не используйте `--purge` и просто выполните `sudo apt remove media-pi-agent`.
-
-sudo apt remove --purge media-pi-agent
-
-# Или, если предпочитаете dpkg
-sudo dpkg -r media-pi-agent
-
-# Удалить конфигурацию вручную (если нужно)
-sudo rm -rf /etc/media-pi-agent/
+curl -H "Authorization: Bearer <server_key>" http://localhost:8081/api/units
 ```
 
-## Обновление конфигурации
+### Health
 
-Агент поддерживает команду обновления конфигурации `systemctl reload media-pi-agent`,  которая отправляет сигнал SIGHUP основному процессу. Агент обрабатывает SIGHUP и перезагружает файл `/etc/media-pi-agent/agent.yaml`.
+- `GET /health` - статус сервиса, версия и время. Авторизация не требуется.
 
-Скрипт установки попытается выполнить обновление конфигурации агента после обновления файла с настройками. Если обновление
- завершится неудачей, будет выполнен перезапуск сервиса.
+### Systemd units
 
-Администраторы также могут инициировать обновление\перезапусе вручную:
+- `GET /api/units` - список разрешенных юнитов и их состояние.
+- `GET /api/units/status?unit=<unit>` - состояние одного разрешенного юнита.
+- `POST /api/units/start` - запустить юнит.
+- `POST /api/units/stop` - остановить юнит.
+- `POST /api/units/restart` - перезапустить юнит.
+- `POST /api/units/enable` - включить юнит.
+- `POST /api/units/disable` - отключить юнит.
+
+Тело запроса для unit action:
+
+```json
+{
+  "unit": "play.video.service"
+}
+```
+
+### Menu
+
+- `GET /api/menu` - список доступных menu-действий.
+- `POST /api/menu/playback/stop` - остановить `play.video.service`.
+- `POST /api/menu/playback/start` - запустить `play.video.service`.
+- `GET /api/menu/service/status` - статусы воспроизведения, sync-процессов и mount `/mnt/ya.disk`.
+- `GET /api/menu/configuration/get` - получить настройки плейлиста, расписания, аудио и фотографии.
+- `PUT /api/menu/configuration/update` - обновить настройки.
+- `POST /api/menu/playlist/start-upload` - загрузить `playlist.m3u` из core API и перезапустить воспроизведение.
+- `POST /api/menu/playlist/stop-upload` - отменить текущую синхронизацию.
+- `POST /api/menu/video/start-upload` - синхронизировать медиафайлы из core API.
+- `POST /api/menu/video/stop-upload` - отменить текущую синхронизацию.
+- `GET /api/menu/screenshot/take` - сделать фотографию немедленно и вернуть файл в ответе.
+- `POST /api/menu/system/reload` - выполнить `systemctl daemon-reload`.
+- `POST /api/menu/system/reboot` - перезагрузить устройство.
+- `POST /api/menu/system/shutdown` - выключить устройство.
+
+### Reload
+
+- `POST /internal/reload` - перезагрузить `/etc/media-pi-agent/agent.yaml` без restart процесса. Метод требует Bearer-токен.
+
+Обычно reload выполняется через systemd:
 
 ```bash
 sudo systemctl reload media-pi-agent || sudo systemctl restart media-pi-agent
 ```
 
+## Синхронизация файлов
 
+Агент синхронизирует файлы напрямую с core API, без отдельных `playlist.upload.*` и `video.upload.*` systemd-юнитов.
+
+Видео-синхронизация:
+
+1. `GET {core_api_base}/api/devicesync` получает manifest.
+2. Локальные файлы сравниваются по размеру и SHA256.
+3. Недостающие или устаревшие файлы загружаются через `GET {core_api_base}/api/devicesync/{id}`.
+4. Файл пишется во временный `.tmp`, проверяется и атомарно переименовывается.
+5. Файлы в `playlist.destination`, отсутствующие в manifest, удаляются.
+
+Плейлист:
+
+1. `GET {core_api_base}/api/devicesync/playlist` загружает активный плейлист.
+2. Файл сохраняется как `{playlist.destination}/playlist.m3u`.
+3. При плановой или ручной playlist-синхронизации агент перезапускает `play.video.service`.
+
+Запросы к core API используют заголовок:
+
+```text
+X-Device-Id: <server_key>
+```
+
+Статус последней видео-синхронизации хранится в памяти и best-effort записывается в `/var/media-pi/sync/sync-status.json`.
+
+## Фотографии
+
+Если `screenshot.interval_minutes > 0`, агент делает фотографию при старте и затем по расписанию `@every <interval>m`. Захват выполняется через `ffmpeg`:
+
+```bash
+ffmpeg -loglevel error -y -i /dev/video0 -frames:v 1 <output>
+```
+
+После успешного захвата файл отправляется в:
+
+```text
+POST {core_api_base}/api/devicesync/screenshot
+```
+
+Файл отправляется как multipart form field `file`, с заголовком `X-Device-Id: <server_key>`. После успешной отправки локальный файл удаляется. Если отправка не удалась, файл остается в директории фотографий и будет повторно отправлен следующим циклом, с учетом `screenshot.resend_limit`.
+
+`GET /api/menu/screenshot/take` делает снимок вручную и возвращает файл клиенту; этот метод не отправляет файл в core API.
+
+## Миграция со старых версий
+
+При первичном создании конфигурации агент пытается перенести отсутствующие настройки из старых systemd/crontab-файлов, если существующей конфигурации агента еще нет:
+
+- пути playlist upload из `playlist.upload.service`;
+- времена playlist/video из старых timer-файлов;
+- интервалы rest из crontab пользователя `media_pi_service_user`;
+- audio output из `/etc/asound.conf`.
+
+После миграции конфигурации setup-скрипт best-effort отключает старые `playlist.upload.service`, `playlist.upload.timer`, `video.upload.service` и `video.upload.timer`. Debian-пакет также best-effort отключает эти unit'ы при первичной установке и при обновлении, не удаляя unit-файлы, которые нужны для миграции.
+
+## Разработка
+
+Требуется Go `1.25.1`.
+
+Запуск тестов:
+
+```bash
+go test ./...
+```
+
+Запуск тестов с race detector и coverage:
+
+```bash
+go test -race -v ./... -coverprofile=coverage.out -covermode=atomic
+```
+
+Интеграционные тесты:
+
+```bash
+go test -race -v -tags=integration ./...
+```
+
+Локальный запуск с тестовой конфигурацией:
+
+```bash
+go run ./cmd/media-pi setup ./agent.local.yaml
+MEDIA_PI_AGENT_CONFIG=./agent.local.yaml go run ./cmd/media-pi
+```
+
+Сборка бинарника:
+
+```bash
+go build -trimpath -buildvcs=false -o build/media-pi-agent ./cmd/media-pi
+```
+
+Сборка ARM-пакета из готового бинарника:
+
+```bash
+./packaging/mkdeb.sh arm64 0.1.0 dist/arm64/media-pi-agent
+./packaging/mkdeb.sh armhf 0.1.0 dist/armhf/media-pi-agent
+```
+
+CI собирает `armhf` и `arm64`, запускает unit/integration tests, публикует `.deb` в GitHub Release для тегов `v*`.
+
+## Устранение неполадок
+
+Проверка службы:
+
+```bash
+sudo systemctl status media-pi-agent
+sudo journalctl -u media-pi-agent -f
+curl http://localhost:8081/health
+```
+
+Проверка конфигурации:
+
+```bash
+sudo cat /etc/media-pi-agent/agent.yaml
+sudo systemctl reload media-pi-agent || sudo systemctl restart media-pi-agent
+```
+
+Проверка регистрации:
+
+```bash
+echo "$CORE_API_BASE"
+curl -I "$CORE_API_BASE/api/status/status"
+```
+
+Проверка rest-расписания:
+
+```bash
+sudo crontab -u pi -l
+```
+
+Замените `pi` на значение `media_pi_service_user`, если оно отличается.
+
+## Удаление
+
+Удалить пакет с конфигурацией:
+
+```bash
+sudo apt remove --purge media-pi-agent
+```
+
+Удалить пакет, сохранив conffiles:
+
+```bash
+sudo apt remove media-pi-agent
+```
+
+Через `dpkg`:
+
+```bash
+sudo dpkg -r media-pi-agent
+```
+
+При необходимости удалить конфигурацию вручную:
+
+```bash
+sudo rm -rf /etc/media-pi-agent/
+```

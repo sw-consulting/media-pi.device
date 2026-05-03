@@ -69,10 +69,10 @@ install -m 0644 "${SCRIPT_DIR}/media-pi-agent.service" "${ROOT}/etc/systemd/syst
 
 # Создаём правило polkit в формате .pkla для polkit 0.105 (Raspberry Pi OS Bullseye).
 # Этот формат не поддерживает фильтрацию по имени unit'а, поэтому предоставляет
-# доступ ко всем операциям manage-units/manage-unit-files для группы svc-ops и пользователя pi.
+# доступ ко всем операциям manage-units/manage-unit-files для группы media-pi.
 cat > "${ROOT}/etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla" <<EOF
 [Media Pi Agent]
-Identity=unix-group:svc-ops;unix-user:pi
+Identity=unix-group:media-pi
 Action=org.freedesktop.systemd1.manage-units;org.freedesktop.systemd1.manage-unit-files
 ResultAny=yes
 ResultInactive=yes
@@ -155,30 +155,94 @@ exit 0
 EOF
 chmod 0755 "${WORK}/DEBIAN/preinst"
 
-# Postinst: выполняется после установки пакета. 
-# Убеждаемся, что существует опциональная системная группа svc-ops.
-# Если группа уже есть, ошибки не будет
+# Postinst: выполняется после установки пакета.
+# Убеждаемся, что существует системная группа media-pi.
+# Если старая группа svc-ops существует, переименовываем ее при upgrade.
 cat > "${WORK}/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
-getent group svc-ops >/dev/null 2>&1 || groupadd -r svc-ops >/dev/null 2>&1 || true
-id -u pi >/dev/null 2>&1 && usermod -aG svc-ops pi || true
+
+disable_unit_if_present() {
+    unit="$1"
+    if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+        echo "Disabling unit: $unit"
+        systemctl disable "$unit" || true
+    fi
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        echo "Stopping unit: $unit"
+        systemctl stop "$unit" || true
+    fi
+}
+
+ensure_media_pi_group() {
+    if getent group media-pi >/dev/null 2>&1; then
+        if getent group svc-ops >/dev/null 2>&1; then
+            members="$(getent group svc-ops | cut -d: -f4)"
+            if [ -n "$members" ]; then
+                old_ifs="$IFS"
+                IFS=","
+                for user in $members; do
+                    [ -n "$user" ] && usermod -aG media-pi "$user" >/dev/null 2>&1 || true
+                done
+                IFS="$old_ifs"
+            fi
+        fi
+        return 0
+    fi
+    if getent group svc-ops >/dev/null 2>&1; then
+        if ! groupmod -n media-pi svc-ops >/dev/null 2>&1; then
+            echo "WARNING: Failed to rename group 'svc-ops' to required group 'media-pi'." >&2
+        fi
+    fi
+    if ! getent group media-pi >/dev/null 2>&1; then
+        if ! groupadd -r media-pi >/dev/null 2>&1; then
+            echo "WARNING: Failed to create required group 'media-pi'." >&2
+        fi
+    fi
+    if ! getent group media-pi >/dev/null 2>&1; then
+        echo "ERROR: Required group 'media-pi' does not exist; aborting because package permissions and polkit rules rely on it." >&2
+        return 1
+    fi
+}
+
+grant_media_pi_group_access() {
+    # Grant group read/write access to data and config directories only
+    for path in \
+        /etc/media-pi-agent \
+        /opt/media-pi \
+        /opt/media-pi-agent \
+        /var/media-pi
+    do
+        if [ -e "$path" ]; then
+            chgrp -R media-pi "$path" 2>/dev/null || true
+            chmod -R g+rwX "$path" 2>/dev/null || true
+            find "$path" -type d -exec chmod g+s {} + 2>/dev/null || true
+        fi
+    done
+    # Grant group read-only access to privileged system/authorization files
+    for path in \
+        /etc/systemd/system/media-pi-agent.service \
+        /etc/polkit-1/localauthority/50-local.d/media-pi-agent.pkla
+    do
+        if [ -e "$path" ]; then
+            chgrp media-pi "$path" 2>/dev/null || true
+            chmod g+r,g-w "$path" 2>/dev/null || true
+        fi
+    done
+}
+
+ensure_media_pi_group
+id -u pi >/dev/null 2>&1 && usermod -aG media-pi pi || true
+grant_media_pi_group_access
 
 # Reload systemd daemon to pick up new/updated service file
 systemctl daemon-reload || true
 
-# On upgrade, disable old playlist/video upload units if they exist
-if [ "$1" = "configure" ] && [ -n "$2" ]; then
-    # Disable old units (best effort, don't fail if they don't exist)
-    for unit in playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
-        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
-            echo "Disabling old unit: $unit"
-            systemctl disable "$unit" || true
-        fi
-        if systemctl is-active --quiet "$unit" 2>/dev/null; then
-            echo "Stopping old unit: $unit"
-            systemctl stop "$unit" || true
-        fi
+# Disable legacy/conflicting units if they exist. This does not remove their
+# unit files, so configuration migration can still read them when needed.
+if [ "$1" = "configure" ]; then
+    for unit in motion.service playlist.upload.service playlist.upload.timer video.upload.service video.upload.timer; do
+        disable_unit_if_present "$unit"
     done
     systemctl daemon-reload || true
 fi
@@ -188,17 +252,15 @@ MEDIA_DIR="/var/media-pi"
 if [ ! -d "$MEDIA_DIR" ]; then
     echo "Creating default media directory: $MEDIA_DIR"
     mkdir -p "$MEDIA_DIR"
-    chown pi:pi "$MEDIA_DIR" 2>/dev/null || true
-    chmod 755 "$MEDIA_DIR" 2>/dev/null || true
 fi
 
 # Ensure sync status directory exists
 SYNC_STATUS_DIR="${MEDIA_DIR}/sync"
 if [ ! -d "$SYNC_STATUS_DIR" ]; then
     mkdir -p "$SYNC_STATUS_DIR"
-    chown pi:pi "$SYNC_STATUS_DIR" 2>/dev/null || true
-    chmod 755 "$SYNC_STATUS_DIR" 2>/dev/null || true
 fi
+
+grant_media_pi_group_access
 
 # Handle service management based on install type
 if [ "$1" = "configure" ]; then

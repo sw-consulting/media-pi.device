@@ -134,7 +134,7 @@ var (
 const DefaultListenAddr = "0.0.0.0:8081"
 
 // DefaultScreenshotPathTemplate is used when screenshot path template is not configured.
-const DefaultScreenshotPathTemplate = "/home/pi/Pictures/cam_$(date +%F_%H-%M-%S).jpg"
+const DefaultScreenshotPathTemplate = "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg"
 
 // DefaultScreenshotInput is used when screenshot input source is not configured.
 const DefaultScreenshotInput = "/dev/video0"
@@ -185,8 +185,7 @@ func DefaultConfig() Config {
 
 // LoadConfigFrom loads configuration from path and updates package-level
 // state (AllowedUnits, ServerKey). It returns the parsed Config to the
-// caller for further use. It also performs migration of settings from systemd
-// files on first run when those settings are missing in the YAML.
+// caller for further use.
 func LoadConfigFrom(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -237,23 +236,10 @@ func LoadConfigFrom(path string) (*Config, error) {
 		c.Screenshot.ResendLimit = DefaultScreenshotResendLimit
 	}
 
-	// Set global variables before migration (which may need them)
+	// Set global variables.
 	AllowedUnits = newAllowedUnits
 	ServerKey = c.ServerKey
 	MediaPiServiceUser = c.MediaPiServiceUser
-
-	// Migrate settings from systemd files if not present in config
-	needsSave := false
-	if err := migrateConfigFromSystemd(&c, &needsSave); err != nil {
-		log.Printf("Warning: Failed to migrate some settings from systemd: %v", err)
-	}
-
-	// Save migrated configuration if needed
-	if needsSave {
-		if err := saveConfigToFile(path, &c); err != nil {
-			log.Printf("Warning: Failed to save migrated configuration: %v", err)
-		}
-	}
 
 	// Store the configuration for later access
 	configMutex.Lock()
@@ -455,6 +441,7 @@ func GenerateServerKey() (string, error) {
 func SetupConfig(configPath string) error {
 	config := DefaultConfig()
 	existing := false
+	hadAgentConfig := false
 
 	data, err := os.ReadFile(configPath)
 	switch {
@@ -464,6 +451,7 @@ func SetupConfig(configPath string) error {
 			return fmt.Errorf("failed to parse existing config: %w", err)
 		}
 		if config.ServerKey != "" {
+			hadAgentConfig = true
 			fmt.Printf("Warning: configuration at %s already has a server_key; it will be overwritten\n", configPath)
 		}
 		if config.ListenAddr == "" {
@@ -477,6 +465,18 @@ func SetupConfig(configPath string) error {
 
 	if coreAPIBase := strings.TrimSpace(os.Getenv("CORE_API_BASE")); coreAPIBase != "" {
 		config.CoreAPIBase = coreAPIBase
+	}
+
+	if !hadAgentConfig {
+		if config.MediaPiServiceUser == "" {
+			config.MediaPiServiceUser = "pi"
+		}
+		MediaPiServiceUser = config.MediaPiServiceUser
+
+		needsSave := false
+		if err := migrateConfigFromSystemd(&config, &needsSave); err != nil {
+			log.Printf("Warning: Failed to migrate some settings from systemd: %v", err)
+		}
 	}
 
 	key, err := GenerateServerKey()
