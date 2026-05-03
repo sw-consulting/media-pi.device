@@ -105,6 +105,15 @@ type UnitActionResponse struct {
 	Result string `json:"result,omitempty"`
 }
 
+// HealthResponse describes the healthcheck endpoint payload. ServiceStatus is
+// included only for authenticated requests.
+type HealthResponse struct {
+	Status        string                 `json:"status"`
+	Version       string                 `json:"version"`
+	Time          string                 `json:"time"`
+	ServiceStatus *ServiceStatusResponse `json:"serviceStatus,omitempty"`
+}
+
 var (
 	// AllowedUnits contains the set of unit names the agent is permitted
 	// to operate on. It is populated by LoadConfigFrom.
@@ -522,25 +531,35 @@ func IsAllowed(unit string) error {
 // invokes the next handler when authentication succeeds.
 func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется заголовок Authorization"})
+		if ServerKey == "" {
+			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Сервер не настроен для аутентификации"})
 			return
 		}
 
-		if !strings.HasPrefix(auth, "Bearer ") {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется токен Bearer"})
-			return
-		}
-
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(token), []byte(ServerKey)) != 1 {
-			JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Недействительный токен"})
+		if !isAuthorizedRequest(r) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется заголовок Authorization"})
+			} else if !strings.HasPrefix(auth, "Bearer ") {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Требуется токен Bearer"})
+			} else {
+				JSONResponse(w, http.StatusUnauthorized, APIResponse{OK: false, ErrMsg: "Недействительный токен"})
+			}
 			return
 		}
 
 		next(w, r)
 	}
+}
+
+func isAuthorizedRequest(r *http.Request) bool {
+	auth := r.Header.Get("Authorization")
+	if auth == "" || !strings.HasPrefix(auth, "Bearer ") || ServerKey == "" {
+		return false
+	}
+
+	token := strings.TrimPrefix(auth, "Bearer ")
+	return subtle.ConstantTimeCompare([]byte(token), []byte(ServerKey)) == 1
 }
 
 // JSONResponse writes an APIResponse as JSON with the provided HTTP status
@@ -769,18 +788,29 @@ func HandleUnitAction(action string) http.HandlerFunc {
 }
 
 // HandleHealth provides a simple healthcheck endpoint with version and
-// timestamp information.
+// timestamp information. Authenticated requests also include service status.
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
 
+	data := HealthResponse{
+		Status:  "healthy",
+		Version: GetVersion(),
+		Time:    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if isAuthorizedRequest(r) {
+		serviceStatus, err := getServiceStatus(r.Context())
+		if err != nil {
+			JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось получить статус сервисов: %v", err)})
+			return
+		}
+		data.ServiceStatus = &serviceStatus
+	}
+
 	JSONResponse(w, http.StatusOK, APIResponse{
-		OK: true,
-		Data: map[string]string{
-			"status":  "healthy",
-			"version": GetVersion(),
-			"time":    time.Now().UTC().Format(time.RFC3339),
-		},
+		OK:   true,
+		Data: data,
 	})
 }
