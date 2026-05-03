@@ -189,23 +189,6 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	})
 	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
 
-	// Create a temporary mounts file and point isPathMounted to read it by
-	// using the MEDIA_PI_AGENT_PROC_MOUNTS environment variable.
-	tmp := t.TempDir()
-	mounts := filepath.Join(tmp, "mounts")
-	if err := os.WriteFile(mounts, []byte("/dev/sda1 /mnt/ya.disk ext4 rw 0 0\n"), 0644); err != nil {
-		t.Fatalf("failed to write mounts: %v", err)
-	}
-	originalProc := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS")
-	if err := os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", mounts); err != nil {
-		t.Fatalf("failed to set env: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Setenv("MEDIA_PI_AGENT_PROC_MOUNTS", originalProc); err != nil {
-			t.Fatalf("failed to restore env: %v", err)
-		}
-	})
-
 	// Set internal sync states for testing
 	setVideoSyncRunning(true)
 	t.Cleanup(func() { setVideoSyncRunning(false) })
@@ -241,10 +224,54 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	if resp.Data.VideoUploadServiceStatus != true {
 		t.Fatalf("expected video sync to be running, got %v", resp.Data.VideoUploadServiceStatus)
 	}
+}
 
-	// Ensure the mount detection reads our temp mounts file
-	if resp.Data.YaDiskMountStatus != true {
-		t.Fatalf("expected ya disk to be reported mounted, got %v", resp.Data.YaDiskMountStatus)
+func TestHandleHealthIncludesServiceStatusWhenAuthorized(t *testing.T) {
+	originalKey := ServerKey
+	ServerKey = "test-key"
+	t.Cleanup(func() { ServerKey = originalKey })
+
+	originalFactory := dbusFactory
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return &noopDBusConnectionForStatus{}, nil
+	})
+	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
+
+	setVideoSyncRunning(true)
+	t.Cleanup(func() { setVideoSyncRunning(false) })
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleHealth(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		OK   bool           `json:"ok"`
+		Data HealthResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if !resp.OK {
+		t.Fatalf("expected ok response")
+	}
+	if resp.Data.ServiceStatus == nil {
+		t.Fatalf("expected service status for authorized health request")
+	}
+	if resp.Data.ServiceStatus.PlaybackServiceStatus != true {
+		t.Fatalf("expected playback service to be active, got %v", resp.Data.ServiceStatus.PlaybackServiceStatus)
+	}
+	if resp.Data.ServiceStatus.PlaylistUploadServiceStatus != false {
+		t.Fatalf("expected playlist sync to be not running, got %v", resp.Data.ServiceStatus.PlaylistUploadServiceStatus)
+	}
+	if resp.Data.ServiceStatus.VideoUploadServiceStatus != true {
+		t.Fatalf("expected video sync to be running, got %v", resp.Data.ServiceStatus.VideoUploadServiceStatus)
 	}
 }
 

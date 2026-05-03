@@ -237,7 +237,6 @@ type ServiceStatusResponse struct {
 	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
 	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
 	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
-	YaDiskMountStatus           bool `json:"yaDiskMountStatus"`
 }
 
 // HandleMenuList returns the list of available menu actions.
@@ -413,73 +412,14 @@ func startPlaybackService(parent context.Context) error {
 	}
 }
 
-// isPathMounted checks whether the given path appears in /proc/mounts.
-// It is small and testable; tests may override behavior by creating a
-// temporary /proc/mounts-like file and setting os.Open to read from it
-// indirectly via injection if necessary. For simplicity we read the real
-// /proc/mounts which is fine for unit tests that don't rely on actual mounts.
-func isPathMounted(path string) bool {
-	// If a test-provided mounts file is set, prefer parsing it. This keeps
-	// unit tests hermetic.
-	if mountsPath := os.Getenv("MEDIA_PI_AGENT_PROC_MOUNTS"); mountsPath != "" {
-		if f, err := os.Open(mountsPath); err == nil {
-			defer func() { _ = f.Close() }()
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				fields := strings.Fields(scanner.Text())
-				if len(fields) >= 2 && fields[1] == path {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	// Try POSIX device-id method: compare device IDs of the path and its
-	// parent. If they differ, the path is a mount point.
-	fi, err := os.Lstat(path)
+func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
+	conn, err := getDBusConnection(parent)
 	if err != nil {
-		return false
-	}
-	parent := filepath.Clean(filepath.Join(path, ".."))
-	pfi, err := os.Lstat(parent)
-	if err != nil {
-		return false
-	}
-
-	if ok, same := sameDevice(fi, pfi); ok {
-		return !same
-	}
-
-	// Fallback: parse /proc/mounts if device-id check isn't available.
-	if f, err := os.Open("/proc/mounts"); err == nil {
-		defer func() { _ = f.Close() }()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			fields := strings.Fields(scanner.Text())
-			if len(fields) >= 2 && fields[1] == path {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// HandleServiceStatus returns statuses for playback, internal sync processes
-// and whether the Yandex disk mount point is mounted.
-func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
-	if !requireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	conn, err := getDBusConnection(context.Background())
-	if err != nil {
-		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
-		return
+		return ServiceStatusResponse{}, err
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
 	// Helper to query ActiveState from unit properties.
@@ -494,11 +434,23 @@ func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
 		return false
 	}
 
-	resp := ServiceStatusResponse{
+	return ServiceStatusResponse{
 		PlaybackServiceStatus:       checkUnit("play.video.service"),
 		PlaylistUploadServiceStatus: IsPlaylistSyncRunning(),
 		VideoUploadServiceStatus:    IsVideoSyncRunning(),
-		YaDiskMountStatus:           isPathMounted("/mnt/ya.disk"),
+	}, nil
+}
+
+// HandleServiceStatus returns statuses for playback and internal sync processes.
+func HandleServiceStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	resp, err := getServiceStatus(context.Background())
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err)})
+		return
 	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: resp})

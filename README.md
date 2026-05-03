@@ -174,7 +174,7 @@ curl -H "Authorization: Bearer <server_key>" http://localhost:8081/api/units
 
 ### Health
 
-- `GET /health` - статус сервиса, версия и время. Авторизация не требуется.
+- `GET /health` - статус сервиса, версия и время. Авторизация не требуется. Если передать корректный `Authorization: Bearer <server_key>`, ответ дополнительно содержит `serviceStatus` со статусами воспроизведения и sync-процессов.
 
 ### Systemd units
 
@@ -199,7 +199,7 @@ curl -H "Authorization: Bearer <server_key>" http://localhost:8081/api/units
 - `GET /api/menu` - список доступных menu-действий.
 - `POST /api/menu/playback/stop` - остановить `play.video.service`.
 - `POST /api/menu/playback/start` - запустить `play.video.service`.
-- `GET /api/menu/service/status` - статусы воспроизведения, sync-процессов и mount `/mnt/ya.disk`.
+- `GET /api/menu/service/status` - статусы воспроизведения и sync-процессов.
 - `GET /api/menu/configuration/get` - получить настройки плейлиста, расписания, аудио и фотографии.
 - `PUT /api/menu/configuration/update` - обновить настройки.
 - `POST /api/menu/playlist/start-upload` - загрузить `playlist.m3u` из core API и перезапустить воспроизведение.
