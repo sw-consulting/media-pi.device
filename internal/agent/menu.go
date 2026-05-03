@@ -703,9 +703,18 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cleanDestination := filepath.Clean(playlistDestination)
-	if !filepath.IsAbs(cleanDestination) || strings.Contains(cleanDestination, "..") {
+	if !filepath.IsAbs(cleanDestination) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
 		return
+	}
+	// Check each component of the original path for ".." traversal tokens.
+	// Checking components (not a substring) avoids false negatives after Clean resolves
+	// traversal (e.g. /a/../b → /b) and false positives on names like "..." or "..cache".
+	for _, component := range strings.Split(filepath.ToSlash(playlistDestination), "/") {
+		if component == ".." {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+			return
+		}
 	}
 
 	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
@@ -752,7 +761,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, playlistDestination); err != nil {
+	if err := writePlaylistUploadConfig(PlaylistServicePath, playlistSource, cleanDestination); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось обновить конфигурацию: %v", err)})
 		return
 	}
