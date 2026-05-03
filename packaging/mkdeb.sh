@@ -190,9 +190,19 @@ ensure_media_pi_group() {
         return 0
     fi
     if getent group svc-ops >/dev/null 2>&1; then
-        groupmod -n media-pi svc-ops >/dev/null 2>&1 || true
+        if ! groupmod -n media-pi svc-ops >/dev/null 2>&1; then
+            echo "WARNING: Failed to rename group 'svc-ops' to required group 'media-pi'." >&2
+        fi
     fi
-    getent group media-pi >/dev/null 2>&1 || groupadd -r media-pi >/dev/null 2>&1 || true
+    if ! getent group media-pi >/dev/null 2>&1; then
+        if ! groupadd -r media-pi >/dev/null 2>&1; then
+            echo "WARNING: Failed to create required group 'media-pi'." >&2
+        fi
+    fi
+    if ! getent group media-pi >/dev/null 2>&1; then
+        echo "ERROR: Required group 'media-pi' does not exist; aborting because package permissions and polkit rules rely on it." >&2
+        return 1
+    fi
 }
 
 grant_media_pi_group_access() {
