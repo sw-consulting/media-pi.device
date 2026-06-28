@@ -51,7 +51,7 @@ func (s *startupPlaybackConn) RebootContext(ctx context.Context) error { return 
 
 func (s *startupPlaybackConn) PowerOffContext(ctx context.Context) error { return nil }
 
-func TestEnsurePlaybackStateOnStartup_StartsOutsideRestInterval(t *testing.T) {
+func TestEnsurePlaybackStateOnStartup_StartsOutsideRestIntervalAndSchedulesPhotoTimers(t *testing.T) {
 	originalFactory := dbusFactory
 	conn := &startupPlaybackConn{}
 	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
@@ -59,11 +59,21 @@ func TestEnsurePlaybackStateOnStartup_StartsOutsideRestInterval(t *testing.T) {
 	})
 	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
 
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Schedule: ScheduleConfig{
 			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
+		},
+		Screenshot: ScreenshotConfig{
+			Timers: []string{"0:00:00"},
 		},
 	}
 	configMutex.Unlock()
@@ -71,6 +81,8 @@ func TestEnsurePlaybackStateOnStartup_StartsOutsideRestInterval(t *testing.T) {
 		configMutex.Lock()
 		currentConfig = originalConfig
 		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
 	})
 
 	now := time.Date(2026, time.April, 29, 8, 30, 0, 0, time.Local)
@@ -84,6 +96,12 @@ func TestEnsurePlaybackStateOnStartup_StartsOutsideRestInterval(t *testing.T) {
 	if conn.startedUnits[0] != "play.video.service" {
 		t.Fatalf("expected play.video.service to be started, got %q", conn.startedUnits[0])
 	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected startup playback start to schedule photo report timers")
+	}
 }
 
 func TestEnsurePlaybackStateOnStartup_SkipsWithinRestInterval(t *testing.T) {
@@ -94,11 +112,21 @@ func TestEnsurePlaybackStateOnStartup_SkipsWithinRestInterval(t *testing.T) {
 	})
 	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
 
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Schedule: ScheduleConfig{
 			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
+		},
+		Screenshot: ScreenshotConfig{
+			Timers: []string{"0:00:00"},
 		},
 	}
 	configMutex.Unlock()
@@ -106,6 +134,8 @@ func TestEnsurePlaybackStateOnStartup_SkipsWithinRestInterval(t *testing.T) {
 		configMutex.Lock()
 		currentConfig = originalConfig
 		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
 	})
 
 	now := time.Date(2026, time.April, 29, 23, 30, 0, 0, time.Local)
@@ -115,5 +145,11 @@ func TestEnsurePlaybackStateOnStartup_SkipsWithinRestInterval(t *testing.T) {
 
 	if len(conn.startedUnits) != 0 {
 		t.Fatalf("expected playback service start to be skipped during rest interval, got %d calls", len(conn.startedUnits))
+	}
+
+	select {
+	case <-called:
+		t.Fatalf("expected photo report timers not to be scheduled during rest interval")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

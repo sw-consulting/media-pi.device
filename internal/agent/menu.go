@@ -341,7 +341,7 @@ func ensurePlaybackStateOnStartupAt(now time.Time) error {
 		return nil
 	}
 
-	if err := startPlaybackService(context.Background()); err != nil {
+	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
 		return fmt.Errorf("start play.video.service on startup: %w", err)
 	}
 
