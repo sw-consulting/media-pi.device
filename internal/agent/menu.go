@@ -228,7 +228,7 @@ type configurationUpdateRequest struct {
 	Playlist   PlaylistUploadConfig `json:"playlist"`
 	Schedule   ScheduleSettings     `json:"schedule"`
 	Audio      AudioSettings        `json:"audio"`
-	Screenshot ScreenshotSettings   `json:"screenshot"`
+	Screenshot *ScreenshotSettings  `json:"screenshot"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -688,14 +688,16 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	photoTimers, err := normalizePhotoTimers(req.Screenshot.Timers)
-	if err != nil {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
-		return
-	}
-
 	// Snapshot current config once to avoid inconsistency from concurrent reloads.
 	cfg := GetCurrentConfig()
+	photoTimers := append([]string{}, cfg.Screenshot.Timers...)
+	if req.Screenshot != nil {
+		photoTimers, err = normalizePhotoTimers(req.Screenshot.Timers)
+		if err != nil {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+			return
+		}
+	}
 
 	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
 	if err != nil {
@@ -735,7 +737,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update configuration file with all settings. This also signals the scheduler
-	// to reload, which is required for screenshot interval changes to take effect.
+	// to reload, which is required for photo report timer changes to take effect.
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
 		restConfigPairs[i] = RestTimePairConfig(p)
