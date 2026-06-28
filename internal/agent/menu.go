@@ -668,6 +668,21 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	safePlaylistBase := filepath.Clean("/var/media-pi")
+	absSafePlaylistBase, err := filepath.Abs(safePlaylistBase)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: "Не удалось проверить путь destination"})
+		return
+	}
+	absDestination, err := filepath.Abs(cleanDestination)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+		return
+	}
+	if absDestination != absSafePlaylistBase && !strings.HasPrefix(absDestination, absSafePlaylistBase+string(os.PathSeparator)) {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+		return
+	}
 
 	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный формат времени. Используйте HH:MM"})
@@ -746,7 +761,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := UpdateConfigSettings(
-		PlaylistConfig{Source: playlistSource, Destination: cleanDestination},
+		PlaylistConfig{Source: playlistSource, Destination: absDestination},
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
 		ScreenshotConfig{
