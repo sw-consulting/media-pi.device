@@ -73,7 +73,7 @@ func TestEnsurePlaybackStateOnStartup_StartsOutsideRestIntervalAndSchedulesPhoto
 			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
 		},
 		Screenshot: ScreenshotConfig{
-			Timers: []string{"0:00:00"},
+			Timers: []string{"00:00:00"},
 		},
 	}
 	configMutex.Unlock()
@@ -126,7 +126,7 @@ func TestEnsurePlaybackStateOnStartup_SkipsWithinRestInterval(t *testing.T) {
 			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
 		},
 		Screenshot: ScreenshotConfig{
-			Timers: []string{"0:00:00"},
+			Timers: []string{"00:00:00"},
 		},
 	}
 	configMutex.Unlock()

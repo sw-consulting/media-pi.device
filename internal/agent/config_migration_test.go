@@ -420,7 +420,7 @@ func TestUpdateConfigSettings(t *testing.T) {
 		PlaylistConfig{Source: "/new/src", Destination: "/new/dst"},
 		ScheduleConfig{Playlist: []string{"12:00"}, Video: []string{"18:00"}},
 		AudioConfig{Output: "analog"},
-		ScreenshotConfig{Timers: []string{"0:00:30"}, PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg", Input: "/dev/video2"},
+		ScreenshotConfig{Timers: []string{"00:00:30"}, PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg", Input: "/dev/video2"},
 	)
 	if err != nil {
 		t.Fatalf("UpdateConfigSettings failed: %v", err)
@@ -434,7 +434,7 @@ func TestUpdateConfigSettings(t *testing.T) {
 	if cfg.Audio.Output != "analog" {
 		t.Errorf("expected audio analog, got %s", cfg.Audio.Output)
 	}
-	if len(cfg.Screenshot.Timers) != 1 || cfg.Screenshot.Timers[0] != "0:00:30" {
+	if len(cfg.Screenshot.Timers) != 1 || cfg.Screenshot.Timers[0] != "00:00:30" {
 		t.Errorf("unexpected screenshot timers: %+v", cfg.Screenshot.Timers)
 	}
 	if cfg.Screenshot.Input != "/dev/video2" {
@@ -452,7 +452,7 @@ func TestUpdateConfigSettings(t *testing.T) {
 	if len(loadedCfg.Schedule.Video) != 1 || loadedCfg.Schedule.Video[0] != "18:00" {
 		t.Errorf("saved config has wrong video schedule: %v", loadedCfg.Schedule.Video)
 	}
-	if len(loadedCfg.Screenshot.Timers) != 1 || loadedCfg.Screenshot.Timers[0] != "0:00:30" {
+	if len(loadedCfg.Screenshot.Timers) != 1 || loadedCfg.Screenshot.Timers[0] != "00:00:30" {
 		t.Errorf("saved config has wrong screenshot timers: %+v", loadedCfg.Screenshot.Timers)
 	}
 	if loadedCfg.Screenshot.Input != "/dev/video2" {
@@ -494,7 +494,7 @@ listen_addr: "0.0.0.0:8081"
 core_api_base: "https://example.com"
 screenshot:
   timers:
-    - "0:00:30"
+    - "00:00:30"
   input: "/dev/video0"
   path_template: "/tmp/cam_$(date +%F_%H-%M-%S).jpg"
 `

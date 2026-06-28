@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1076,12 +1075,12 @@ func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
 func parsePhotoTimerDuration(value string) (time.Duration, error) {
 	trimmed := strings.TrimSpace(value)
 	parts := strings.Split(trimmed, ":")
-	if len(parts) != 3 || parts[0] == "" || len(parts[1]) != 2 || len(parts[2]) != 2 {
-		return 0, fmt.Errorf("неверный формат таймера фотоотчёта %q. Используйте H:MM:SS", value)
+	if len(parts) != 3 || len(parts[0]) != 2 || len(parts[1]) != 2 || len(parts[2]) != 2 {
+		return 0, fmt.Errorf("неверный формат таймера фотоотчёта %q. Используйте HH:mm:ss", value)
 	}
 
 	hours, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || hours < 0 {
+	if err != nil || hours < 0 || hours > 23 {
 		return 0, fmt.Errorf("неверный формат часов в таймере фотоотчёта %q", value)
 	}
 
@@ -1095,14 +1094,7 @@ func parsePhotoTimerDuration(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("неверный формат секунд в таймере фотоотчёта %q", value)
 	}
 
-	const maxDurationSeconds = int64(math.MaxInt64 / int64(time.Second))
-	if hours > maxDurationSeconds/3600 {
-		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
-	}
 	totalSeconds := hours*3600 + minutes*60 + seconds
-	if totalSeconds > maxDurationSeconds {
-		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
-	}
 
 	return time.Duration(totalSeconds) * time.Second, nil
 }
@@ -1112,7 +1104,7 @@ func formatPhotoTimerDuration(duration time.Duration) string {
 	hours := totalSeconds / 3600
 	minutes := (totalSeconds % 3600) / 60
 	seconds := totalSeconds % 60
-	return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
 func normalizePhotoTimers(raw []string) ([]string, error) {
