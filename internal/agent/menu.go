@@ -70,6 +70,9 @@ var (
 	CrontabWriteFunc = defaultCrontabWrite
 	cronParser       = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	playbackTimeNow  = time.Now
+
+	playbackStartTimeout            = 10 * time.Second
+	playbackStartActiveCheckTimeout = 2 * time.Second
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -399,7 +402,7 @@ func startPlaybackService(parent context.Context) error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, playbackStartTimeout)
 	defer cancel()
 
 	ch := make(chan string, 1)
@@ -415,8 +418,26 @@ func startPlaybackService(parent context.Context) error {
 		}
 		return nil
 	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			statusCtx, statusCancel := context.WithTimeout(parent, playbackStartActiveCheckTimeout)
+			defer statusCancel()
+			if isUnitActive(statusCtx, conn, "play.video.service") {
+				return nil
+			}
+		}
 		return errors.New("таймаут запуска воспроизведения")
 	}
+}
+
+func isUnitActive(ctx context.Context, conn DBusConnection, unit string) bool {
+	props, err := conn.GetUnitPropertiesContext(ctx, unit)
+	if err != nil {
+		return false
+	}
+	if state, ok := props["ActiveState"].(string); ok {
+		return state == "active"
+	}
+	return false
 }
 
 func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
@@ -429,20 +450,8 @@ func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
-	// Helper to query ActiveState from unit properties.
-	checkUnit := func(unit string) bool {
-		props, err := conn.GetUnitPropertiesContext(ctx, unit)
-		if err != nil {
-			return false
-		}
-		if state, ok := props["ActiveState"].(string); ok {
-			return state == "active"
-		}
-		return false
-	}
-
 	return ServiceStatusResponse{
-		PlaybackServiceStatus:       checkUnit("play.video.service"),
+		PlaybackServiceStatus:       isUnitActive(ctx, conn, "play.video.service"),
 		PlaylistUploadServiceStatus: IsPlaylistSyncRunning(),
 		VideoUploadServiceStatus:    IsVideoSyncRunning(),
 	}, nil

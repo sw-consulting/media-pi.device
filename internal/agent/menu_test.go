@@ -205,6 +205,108 @@ func TestHandlePlaybackStartSchedulesPhotoReportTimers(t *testing.T) {
 	}
 }
 
+type startPlaybackTimeoutConn struct {
+	noopDBusConnection
+	activeState             string
+	startedUnits            []string
+	unitPropertiesRequested bool
+}
+
+func (c *startPlaybackTimeoutConn) StartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.startedUnits = append(c.startedUnits, name)
+	return 1, nil
+}
+
+func (c *startPlaybackTimeoutConn) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
+	c.unitPropertiesRequested = true
+	return map[string]any{"ActiveState": c.activeState}, nil
+}
+
+func TestStartPlaybackForPlaylistStartAcceptsActiveServiceAfterDBusTimeoutAndSchedulesPhotoReport(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &startPlaybackTimeoutConn{activeState: "active"}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalStartTimeout := playbackStartTimeout
+	originalActiveCheckTimeout := playbackStartActiveCheckTimeout
+	playbackStartTimeout = time.Millisecond
+	playbackStartActiveCheckTimeout = 50 * time.Millisecond
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		playbackStartTimeout = originalStartTimeout
+		playbackStartActiveCheckTimeout = originalActiveCheckTimeout
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
+		t.Fatalf("startPlaybackForPlaylistStart() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(conn.startedUnits, []string{"play.video.service"}) {
+		t.Fatalf("unexpected started units: %+v", conn.startedUnits)
+	}
+	if !conn.unitPropertiesRequested {
+		t.Fatalf("expected active-state check after DBus start timeout")
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected photo report capture after active playback start")
+	}
+}
+
+func TestStartPlaybackServiceReturnsTimeoutWhenDBusTimesOutAndServiceInactive(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &startPlaybackTimeoutConn{activeState: "inactive"}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalStartTimeout := playbackStartTimeout
+	originalActiveCheckTimeout := playbackStartActiveCheckTimeout
+	playbackStartTimeout = time.Millisecond
+	playbackStartActiveCheckTimeout = 50 * time.Millisecond
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		playbackStartTimeout = originalStartTimeout
+		playbackStartActiveCheckTimeout = originalActiveCheckTimeout
+	})
+
+	err := startPlaybackService(context.Background())
+	if err == nil {
+		t.Fatalf("expected playback start timeout")
+	}
+	if !strings.Contains(err.Error(), "таймаут запуска воспроизведения") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if !conn.unitPropertiesRequested {
+		t.Fatalf("expected active-state check after DBus start timeout")
+	}
+}
+
 func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
