@@ -860,7 +860,7 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			Timers:       []string{"0:00:30"},
+			Timers:       []string{"00:00:30"},
 			PathTemplate: pathTemplate,
 			Input:        "/dev/video0",
 		},
@@ -964,7 +964,7 @@ func TestSchedulePlaylistPhotoCapturesUsesConfiguredTimers(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
-		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
 	}
 	configMutex.Unlock()
 
@@ -995,7 +995,7 @@ func TestScheduleRestEndPhotoReportsDoesNotStartPlayback(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
-		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
 	}
 	configMutex.Unlock()
 
@@ -1160,7 +1160,7 @@ func TestCaptureScreenshotKeepsFileWhenUploadFails(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			Timers:       []string{"0:00:30"},
+			Timers:       []string{"00:00:30"},
 			PathTemplate: pathTemplate,
 			Input:        "/dev/video0",
 		},
@@ -1273,7 +1273,7 @@ func TestCaptureScreenshotResendsPendingFilesWithLimit(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			Timers:       []string{"0:00:30"},
+			Timers:       []string{"00:00:30"},
 			PathTemplate: pathTemplate,
 			Input:        "/dev/video0",
 			ResendLimit:  2,
@@ -1323,7 +1323,7 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			Timers:       []string{"0:00:30"},
+			Timers:       []string{"00:00:30"},
 			PathTemplate: "   ",
 			Input:        "/dev/video0",
 		},
@@ -1345,7 +1345,7 @@ func TestCaptureScreenshotRequiresInput(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			Timers:       []string{"0:00:30"},
+			Timers:       []string{"00:00:30"},
 			PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
 			Input:        "   ",
 		},

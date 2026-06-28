@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -71,6 +70,9 @@ var (
 	CrontabWriteFunc = defaultCrontabWrite
 	cronParser       = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	playbackTimeNow  = time.Now
+
+	playbackStartTimeout            = 10 * time.Second
+	playbackStartActiveCheckTimeout = 2 * time.Second
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -400,7 +402,7 @@ func startPlaybackService(parent context.Context) error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, playbackStartTimeout)
 	defer cancel()
 
 	ch := make(chan string, 1)
@@ -416,8 +418,26 @@ func startPlaybackService(parent context.Context) error {
 		}
 		return nil
 	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			statusCtx, statusCancel := context.WithTimeout(parent, playbackStartActiveCheckTimeout)
+			defer statusCancel()
+			if isUnitActive(statusCtx, conn, "play.video.service") {
+				return nil
+			}
+		}
 		return errors.New("таймаут запуска воспроизведения")
 	}
+}
+
+func isUnitActive(ctx context.Context, conn DBusConnection, unit string) bool {
+	props, err := conn.GetUnitPropertiesContext(ctx, unit)
+	if err != nil {
+		return false
+	}
+	if state, ok := props["ActiveState"].(string); ok {
+		return state == "active"
+	}
+	return false
 }
 
 func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
@@ -430,20 +450,8 @@ func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 
-	// Helper to query ActiveState from unit properties.
-	checkUnit := func(unit string) bool {
-		props, err := conn.GetUnitPropertiesContext(ctx, unit)
-		if err != nil {
-			return false
-		}
-		if state, ok := props["ActiveState"].(string); ok {
-			return state == "active"
-		}
-		return false
-	}
-
 	return ServiceStatusResponse{
-		PlaybackServiceStatus:       checkUnit("play.video.service"),
+		PlaybackServiceStatus:       isUnitActive(ctx, conn, "play.video.service"),
 		PlaylistUploadServiceStatus: IsPlaylistSyncRunning(),
 		VideoUploadServiceStatus:    IsVideoSyncRunning(),
 	}, nil
@@ -1076,12 +1084,12 @@ func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
 func parsePhotoTimerDuration(value string) (time.Duration, error) {
 	trimmed := strings.TrimSpace(value)
 	parts := strings.Split(trimmed, ":")
-	if len(parts) != 3 || parts[0] == "" || len(parts[1]) != 2 || len(parts[2]) != 2 {
-		return 0, fmt.Errorf("неверный формат таймера фотоотчёта %q. Используйте H:MM:SS", value)
+	if len(parts) != 3 || len(parts[0]) != 2 || len(parts[1]) != 2 || len(parts[2]) != 2 {
+		return 0, fmt.Errorf("неверный формат таймера фотоотчёта %q. Используйте HH:mm:ss", value)
 	}
 
 	hours, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || hours < 0 {
+	if err != nil || hours < 0 || hours > 23 {
 		return 0, fmt.Errorf("неверный формат часов в таймере фотоотчёта %q", value)
 	}
 
@@ -1095,14 +1103,7 @@ func parsePhotoTimerDuration(value string) (time.Duration, error) {
 		return 0, fmt.Errorf("неверный формат секунд в таймере фотоотчёта %q", value)
 	}
 
-	const maxDurationSeconds = int64(math.MaxInt64 / int64(time.Second))
-	if hours > maxDurationSeconds/3600 {
-		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
-	}
 	totalSeconds := hours*3600 + minutes*60 + seconds
-	if totalSeconds > maxDurationSeconds {
-		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
-	}
 
 	return time.Duration(totalSeconds) * time.Second, nil
 }
@@ -1112,7 +1113,7 @@ func formatPhotoTimerDuration(duration time.Duration) string {
 	hours := totalSeconds / 3600
 	minutes := (totalSeconds % 3600) / 60
 	seconds := totalSeconds % 60
-	return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
 
 func normalizePhotoTimers(raw []string) ([]string, error) {
