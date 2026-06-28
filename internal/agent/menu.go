@@ -1144,7 +1144,10 @@ func photoTimerDurations(raw []string) ([]time.Duration, error) {
 
 	durations := make([]time.Duration, 0, len(timers))
 	for _, timer := range timers {
-		duration, _ := parsePhotoTimerDuration(timer)
+		duration, err := parsePhotoTimerDuration(timer)
+		if err != nil {
+			return nil, err
+		}
 		durations = append(durations, duration)
 	}
 	return durations, nil
