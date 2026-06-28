@@ -762,14 +762,11 @@ func schedulerLoop() {
 			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
 			cronSchedulerLock.Lock()
 			_, err := cronScheduler.AddFunc(cronSpec, func() {
-				log.Printf("Running scheduled rest-end playback start at %s", scheduledStopTime)
-				if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
-					log.Printf("Failed to start playback after rest time ended: %v", err)
-				}
+				scheduleRestEndPhotoReports(scheduledStopTime)
 			})
 			cronSchedulerLock.Unlock()
 			if err != nil {
-				log.Printf("Warning: Failed to schedule rest-end playback start at %s: %v", scheduledStopTime, err)
+				log.Printf("Warning: Failed to schedule rest-end photo reports at %s: %v", scheduledStopTime, err)
 			}
 		}
 
@@ -782,6 +779,11 @@ func schedulerLoop() {
 		<-syncReloadChan
 		log.Println("Reloading sync schedule")
 	}
+}
+
+func scheduleRestEndPhotoReports(scheduledStopTime string) {
+	log.Printf("Running scheduled rest-end photo report scheduling at %s", scheduledStopTime)
+	schedulePlaylistPhotoCaptures()
 }
 
 func schedulePlaylistPhotoCaptures() {

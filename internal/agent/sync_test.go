@@ -991,6 +991,49 @@ func TestSchedulePlaylistPhotoCapturesUsesConfiguredTimers(t *testing.T) {
 	}
 }
 
+func TestScheduleRestEndPhotoReportsDoesNotStartPlayback(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalFactory := dbusFactory
+	dbusCalled := false
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		dbusCalled = true
+		return nil, errors.New("unexpected playback start")
+	})
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		SetDBusConnectionFactory(originalFactory)
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	scheduleRestEndPhotoReports("09:00")
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected rest-end photo report scheduling to capture")
+	}
+
+	if dbusCalled {
+		t.Fatalf("expected rest-end photo report scheduling not to start playback")
+	}
+}
+
 func TestSchedulePlaylistPhotoCapturesInvalidTimersCancelPendingCaptures(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
