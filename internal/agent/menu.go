@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -209,9 +210,9 @@ type AudioSettings struct {
 	Output string `json:"output"`
 }
 
-// ScreenshotSettings describes periodic screenshot capture settings.
+// ScreenshotSettings describes playlist-relative screenshot capture settings.
 type ScreenshotSettings struct {
-	IntervalMinutes int `json:"intervalMinutes"`
+	Timers []string `json:"timers"`
 }
 
 // ConfigurationSettings aggregates playlist upload configuration, schedule, audio output, and screenshot capture settings.
@@ -222,13 +223,12 @@ type ConfigurationSettings struct {
 	Screenshot ScreenshotSettings   `json:"screenshot"`
 }
 
-// configurationUpdateRequest mirrors ConfigurationSettings but keeps Screenshot as a pointer
-// to preserve backwards compatibility with clients that omit the screenshot object.
+// configurationUpdateRequest mirrors ConfigurationSettings.
 type configurationUpdateRequest struct {
 	Playlist   PlaylistUploadConfig `json:"playlist"`
 	Schedule   ScheduleSettings     `json:"schedule"`
 	Audio      AudioSettings        `json:"audio"`
-	Screenshot *ScreenshotSettings  `json:"screenshot,omitempty"`
+	Screenshot *ScreenshotSettings  `json:"screenshot"`
 }
 
 // ServiceStatusResponse describes the service status returned by the
@@ -310,7 +310,7 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := startPlaybackService(context.Background()); err != nil {
+	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось запустить воспроизведение: %v", err),
@@ -341,7 +341,7 @@ func ensurePlaybackStateOnStartupAt(now time.Time) error {
 		return nil
 	}
 
-	if err := startPlaybackService(context.Background()); err != nil {
+	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
 		return fmt.Errorf("start play.video.service on startup: %w", err)
 	}
 
@@ -383,6 +383,14 @@ func isWithinConfiguredRestInterval(now time.Time, pairs []RestTimePairConfig) b
 	}
 
 	return false
+}
+
+func startPlaybackForPlaylistStart(parent context.Context) error {
+	if err := startPlaybackService(parent); err != nil {
+		return err
+	}
+	schedulePlaylistPhotoCaptures()
+	return nil
 }
 
 func startPlaybackService(parent context.Context) error {
@@ -612,6 +620,10 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 	for i, r := range cfg.Schedule.Rest {
 		restPairs[i] = RestTimePair(r)
 	}
+	photoTimers := append([]string{}, cfg.Screenshot.Timers...)
+	if photoTimers == nil {
+		photoTimers = []string{}
+	}
 
 	JSONResponse(w, http.StatusOK, APIResponse{OK: true, Data: ConfigurationSettings{
 		Playlist: PlaylistUploadConfig{
@@ -627,7 +639,7 @@ func HandleConfigurationGet(w http.ResponseWriter, r *http.Request) {
 			Output: cfg.Audio.Output,
 		},
 		Screenshot: ScreenshotSettings{
-			IntervalMinutes: cfg.Screenshot.IntervalMinutes,
+			Timers: photoTimers,
 		},
 	}})
 }
@@ -692,13 +704,13 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Snapshot current config once to avoid inconsistency from concurrent reloads.
 	cfg := GetCurrentConfig()
-	screenshotIntervalMinutes := cfg.Screenshot.IntervalMinutes
+	photoTimers := append([]string{}, cfg.Screenshot.Timers...)
 	if req.Screenshot != nil {
-		screenshotIntervalMinutes = req.Screenshot.IntervalMinutes
-	}
-	if screenshotIntervalMinutes < 0 {
-		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "screenshot.intervalMinutes не может быть отрицательным"})
-		return
+		photoTimers, err = normalizePhotoTimers(req.Screenshot.Timers)
+		if err != nil {
+			JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: err.Error()})
+			return
+		}
 	}
 
 	normalizedPlaylist, err := normalizeTimes(req.Schedule.Playlist)
@@ -739,7 +751,7 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update configuration file with all settings. This also signals the scheduler
-	// to reload, which is required for screenshot interval changes to take effect.
+	// to reload, which is required for photo report timer changes to take effect.
 	restConfigPairs := make([]RestTimePairConfig, len(restPairs))
 	for i, p := range restPairs {
 		restConfigPairs[i] = RestTimePairConfig(p)
@@ -750,10 +762,10 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 		ScheduleConfig{Playlist: normalizedPlaylist, Video: normalizedVideo, Rest: restConfigPairs},
 		AudioConfig{Output: req.Audio.Output},
 		ScreenshotConfig{
-			IntervalMinutes: screenshotIntervalMinutes,
-			PathTemplate:    cfg.Screenshot.PathTemplate,
-			Input:           cfg.Screenshot.Input,
-			ResendLimit:     cfg.Screenshot.ResendLimit,
+			Timers:       photoTimers,
+			PathTemplate: cfg.Screenshot.PathTemplate,
+			Input:        cfg.Screenshot.Input,
+			ResendLimit:  cfg.Screenshot.ResendLimit,
 		},
 	); err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: fmt.Sprintf("Не удалось сохранить конфигурацию: %v", err)})
@@ -1041,6 +1053,7 @@ func RestartVideoPlayService() error {
 		if result != "done" {
 			return fmt.Errorf("restart failed with result: %s", result)
 		}
+		schedulePlaylistPhotoCaptures()
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("restart timeout")
@@ -1058,6 +1071,100 @@ func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
 		pairs = append(pairs, RestTimePair{Start: start, Stop: stop})
 	}
 	return pairs, nil
+}
+
+func parsePhotoTimerDuration(value string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	parts := strings.Split(trimmed, ":")
+	if len(parts) != 3 || parts[0] == "" || len(parts[1]) != 2 || len(parts[2]) != 2 {
+		return 0, fmt.Errorf("неверный формат таймера фотоотчёта %q. Используйте H:MM:SS", value)
+	}
+
+	hours, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || hours < 0 {
+		return 0, fmt.Errorf("неверный формат часов в таймере фотоотчёта %q", value)
+	}
+
+	minutes, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || minutes < 0 || minutes > 59 {
+		return 0, fmt.Errorf("неверный формат минут в таймере фотоотчёта %q", value)
+	}
+
+	seconds, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || seconds < 0 || seconds > 59 {
+		return 0, fmt.Errorf("неверный формат секунд в таймере фотоотчёта %q", value)
+	}
+
+	const maxDurationSeconds = int64(math.MaxInt64 / int64(time.Second))
+	if hours > maxDurationSeconds/3600 {
+		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
+	}
+	totalSeconds := hours*3600 + minutes*60 + seconds
+	if totalSeconds > maxDurationSeconds {
+		return 0, fmt.Errorf("таймер фотоотчёта %q слишком большой", value)
+	}
+
+	return time.Duration(totalSeconds) * time.Second, nil
+}
+
+func formatPhotoTimerDuration(duration time.Duration) string {
+	totalSeconds := int64(duration / time.Second)
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+}
+
+func normalizePhotoTimers(raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return []string{}, nil
+	}
+
+	unique := map[time.Duration]struct{}{}
+	durations := make([]time.Duration, 0, len(raw))
+	for _, item := range raw {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+
+		duration, err := parsePhotoTimerDuration(value)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := unique[duration]; exists {
+			continue
+		}
+		unique[duration] = struct{}{}
+		durations = append(durations, duration)
+	}
+
+	sort.Slice(durations, func(i, j int) bool {
+		return durations[i] < durations[j]
+	})
+
+	timers := make([]string, len(durations))
+	for i, duration := range durations {
+		timers[i] = formatPhotoTimerDuration(duration)
+	}
+	return timers, nil
+}
+
+func photoTimerDurations(raw []string) ([]time.Duration, error) {
+	timers, err := normalizePhotoTimers(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	durations := make([]time.Duration, 0, len(timers))
+	for _, timer := range timers {
+		duration, err := parsePhotoTimerDuration(timer)
+		if err != nil {
+			return nil, err
+		}
+		durations = append(durations, duration)
+	}
+	return durations, nil
 }
 
 func validateRestTimePairs(pairs []RestTimePair) error {

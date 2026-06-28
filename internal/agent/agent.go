@@ -50,12 +50,12 @@ type AudioConfig struct {
 	Output string `yaml:"output,omitempty" json:"output,omitempty"`
 }
 
-// ScreenshotConfig describes periodic screenshot capture settings.
+// ScreenshotConfig describes playlist-relative screenshot capture settings.
 type ScreenshotConfig struct {
-	IntervalMinutes int    `yaml:"interval_minutes,omitempty" json:"interval_minutes,omitempty"`
-	PathTemplate    string `yaml:"path_template,omitempty" json:"path_template,omitempty"`
-	Input           string `yaml:"input,omitempty" json:"input,omitempty"`
-	ResendLimit     int    `yaml:"resend_limit,omitempty" json:"resend_limit,omitempty"`
+	Timers       []string `yaml:"timers,omitempty" json:"timers,omitempty"`
+	PathTemplate string   `yaml:"path_template,omitempty" json:"path_template,omitempty"`
+	Input        string   `yaml:"input,omitempty" json:"input,omitempty"`
+	ResendLimit  int      `yaml:"resend_limit,omitempty" json:"resend_limit,omitempty"`
 }
 
 // Config represents the agent configuration file structure. It is loaded

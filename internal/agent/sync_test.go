@@ -860,9 +860,9 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    pathTemplate,
-			Input:           "/dev/video0",
+			Timers:       []string{"0:00:30"},
+			PathTemplate: pathTemplate,
+			Input:        "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -911,19 +911,7 @@ func TestCaptureScreenshotUsesConfiguredTemplate(t *testing.T) {
 	}
 }
 
-func TestTriggerStartupScreenshotCapture_RunsWhenEnabled(t *testing.T) {
-	configMutex.Lock()
-	originalConfig := currentConfig
-	currentConfig = &Config{
-		Screenshot: ScreenshotConfig{IntervalMinutes: 30},
-	}
-	configMutex.Unlock()
-	t.Cleanup(func() {
-		configMutex.Lock()
-		currentConfig = originalConfig
-		configMutex.Unlock()
-	})
-
+func TestSchedulePlaylistPhotoCaptureDurationsRunsImmediateCapture(t *testing.T) {
 	originalCapture := runScreenshotCapture
 	called := make(chan struct{}, 1)
 	runScreenshotCapture = func() error {
@@ -932,31 +920,173 @@ func TestTriggerStartupScreenshotCapture_RunsWhenEnabled(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
 	})
 
-	triggerStartupScreenshotCapture()
+	schedulePlaylistPhotoCaptureDurations([]time.Duration{0})
 
 	select {
 	case <-called:
-		// expected
-	case <-time.After(1 * time.Second):
-		t.Fatalf("expected startup screenshot capture to run")
+	case <-time.After(time.Second):
+		t.Fatalf("expected immediate photo report capture")
 	}
 }
 
-func TestTriggerStartupScreenshotCapture_SkipsWhenDisabled(t *testing.T) {
+func TestSchedulePlaylistPhotoCaptureDurationsCancelsPriorPendingCaptures(t *testing.T) {
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 2)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	schedulePlaylistPhotoCaptureDurations([]time.Duration{200 * time.Millisecond})
+	schedulePlaylistPhotoCaptureDurations([]time.Duration{10 * time.Millisecond})
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected replacement photo report capture")
+	}
+
+	select {
+	case <-called:
+		t.Fatalf("expected pending capture from previous playlist start to be cancelled")
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+func TestSchedulePlaylistPhotoCapturesUsesConfiguredTimers(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
-		Screenshot: ScreenshotConfig{IntervalMinutes: 0},
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
 	}
 	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
 	t.Cleanup(func() {
 		configMutex.Lock()
 		currentConfig = originalConfig
 		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
 	})
 
+	schedulePlaylistPhotoCaptures()
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected configured photo report timer to capture")
+	}
+}
+
+func TestScheduleRestEndPhotoReportsDoesNotStartPlayback(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalFactory := dbusFactory
+	dbusCalled := false
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		dbusCalled = true
+		return nil, errors.New("unexpected playback start")
+	})
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		SetDBusConnectionFactory(originalFactory)
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	scheduleRestEndPhotoReports("09:00")
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected rest-end photo report scheduling to capture")
+	}
+
+	if dbusCalled {
+		t.Fatalf("expected rest-end photo report scheduling not to start playback")
+	}
+}
+
+func TestSchedulePlaylistPhotoCapturesInvalidTimersCancelPendingCaptures(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"bad"}},
+	}
+	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	schedulePlaylistPhotoCaptureDurations([]time.Duration{75 * time.Millisecond})
+	schedulePlaylistPhotoCaptures()
+
+	select {
+	case <-called:
+		t.Fatalf("expected invalid timers to cancel pending photo report captures")
+	case <-time.After(125 * time.Millisecond):
+	}
+}
+
+func TestRunScheduledPhotoCaptureSkipsCanceledContext(t *testing.T) {
+	originalCapture := runScreenshotCapture
+	called := false
+	runScreenshotCapture = func() error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() {
+		runScreenshotCapture = originalCapture
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	runScheduledPhotoCapture(ctx)
+
+	if called {
+		t.Fatalf("did not expect capture for canceled context")
+	}
+}
+
+func TestRunScheduledPhotoCaptureSkipsWhenContextCanceledWhileWaitingForLock(t *testing.T) {
 	originalCapture := runScreenshotCapture
 	called := make(chan struct{}, 1)
 	runScreenshotCapture = func() error {
@@ -967,13 +1097,48 @@ func TestTriggerStartupScreenshotCapture_SkipsWhenDisabled(t *testing.T) {
 		runScreenshotCapture = originalCapture
 	})
 
-	triggerStartupScreenshotCapture()
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan struct{})
+	done := make(chan struct{})
+
+	scheduledPhotoCaptureLock.Lock()
+	go func() {
+		close(entered)
+		runScheduledPhotoCapture(ctx)
+		close(done)
+	}()
+	<-entered
+	cancel()
+	scheduledPhotoCaptureLock.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("expected scheduled capture goroutine to finish")
+	}
 
 	select {
 	case <-called:
-		t.Fatalf("did not expect startup screenshot capture to run when interval is disabled")
-	case <-time.After(150 * time.Millisecond):
-		// expected
+		t.Fatalf("did not expect capture after context was canceled while waiting")
+	default:
+	}
+}
+
+func TestRunScheduledPhotoCaptureHandlesCaptureError(t *testing.T) {
+	originalCapture := runScreenshotCapture
+	called := false
+	runScreenshotCapture = func() error {
+		called = true
+		return errors.New("camera failed")
+	}
+	t.Cleanup(func() {
+		runScreenshotCapture = originalCapture
+	})
+
+	runScheduledPhotoCapture(context.Background())
+
+	if !called {
+		t.Fatalf("expected capture attempt")
 	}
 }
 
@@ -995,9 +1160,9 @@ func TestCaptureScreenshotKeepsFileWhenUploadFails(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    pathTemplate,
-			Input:           "/dev/video0",
+			Timers:       []string{"0:00:30"},
+			PathTemplate: pathTemplate,
+			Input:        "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -1108,10 +1273,10 @@ func TestCaptureScreenshotResendsPendingFilesWithLimit(t *testing.T) {
 		CoreAPIBase: server.URL,
 		ServerKey:   "test-device-key",
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    pathTemplate,
-			Input:           "/dev/video0",
-			ResendLimit:     2,
+			Timers:       []string{"0:00:30"},
+			PathTemplate: pathTemplate,
+			Input:        "/dev/video0",
+			ResendLimit:  2,
 		},
 	}
 	configMutex.Unlock()
@@ -1158,9 +1323,9 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    "   ",
-			Input:           "/dev/video0",
+			Timers:       []string{"0:00:30"},
+			PathTemplate: "   ",
+			Input:        "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
@@ -1175,49 +1340,14 @@ func TestCaptureScreenshotRequiresTemplate(t *testing.T) {
 	}
 }
 
-func TestCaptureScreenshotDisabledWhenIntervalIsZero(t *testing.T) {
-	configMutex.Lock()
-	originalConfig := currentConfig
-	currentConfig = &Config{
-		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 0,
-			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
-			Input:           "/dev/video0",
-		},
-	}
-	configMutex.Unlock()
-	t.Cleanup(func() {
-		configMutex.Lock()
-		currentConfig = originalConfig
-		configMutex.Unlock()
-	})
-
-	originalRunner := runScreenshotCommand
-	called := false
-	runScreenshotCommand = func(inputPath, outputPath string) error {
-		called = true
-		return nil
-	}
-	t.Cleanup(func() {
-		runScreenshotCommand = originalRunner
-	})
-
-	if err := captureScreenshot(); err != nil {
-		t.Fatalf("captureScreenshot() returned error: %v", err)
-	}
-	if called {
-		t.Fatalf("expected screenshot command runner to not be called when interval is zero")
-	}
-}
-
 func TestCaptureScreenshotRequiresInput(t *testing.T) {
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
-			Input:           "   ",
+			Timers:       []string{"0:00:30"},
+			PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
+			Input:        "   ",
 		},
 	}
 	configMutex.Unlock()
