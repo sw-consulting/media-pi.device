@@ -116,7 +116,9 @@ playlist:
   destination: "/var/media-pi"
 
 screenshot:
-  interval_minutes: 0
+  timers:
+    - "0:00:30"
+    - "0:30:00"
   resend_limit: 5
   input: "/dev/video0"
   path_template: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg"
@@ -148,7 +150,7 @@ audio:
 - `schedule.video` - времена синхронизации медиафайлов в формате `HH:MM`.
 - `schedule.rest` - интервалы нерабочего времени; агент управляет остановкой и запуском `play.video.service`.
 - `audio.output` - аудиовыход, `hdmi` или `jack`.
-- `screenshot.interval_minutes` - интервал автоматического захвата фотографии; `0` отключает автоматический захват.
+- `screenshot.timers` - интервалы фотоотчёта после каждого запуска плейлиста в формате `H:MM:SS`; пустой список отключает автоматический фотоотчёт.
 - `screenshot.resend_limit` - сколько старых неотправленных фотографий повторно отправлять за один цикл.
 - `screenshot.input` - видеоустройство для `ffmpeg`, по умолчанию `/dev/video0`.
 - `screenshot.path_template` - шаблон локального пути для временного файла фотографии.
@@ -249,7 +251,7 @@ X-Device-Id: <server_key>
 
 ## Фотографии
 
-Если `screenshot.interval_minutes > 0`, агент делает фотографию при старте и затем по расписанию `@every <interval>m`. Захват выполняется через `ffmpeg`:
+Если `screenshot.timers` содержит интервалы, агент после каждого запуска плейлиста отменяет ранее запланированные фотографии и планирует новые снимки относительно этого запуска. Захват выполняется через `ffmpeg`:
 
 ```bash
 ffmpeg -loglevel error -y -i /dev/video0 -frames:v 1 <output>
@@ -261,7 +263,7 @@ ffmpeg -loglevel error -y -i /dev/video0 -frames:v 1 <output>
 POST {core_api_base}/api/devicesync/screenshot
 ```
 
-Файл отправляется как multipart form field `file`, с заголовком `X-Device-Id: <server_key>`. После успешной отправки локальный файл удаляется. Если отправка не удалась, файл остается в директории фотографий и будет повторно отправлен следующим циклом, с учетом `screenshot.resend_limit`.
+Файл отправляется как multipart form field `file`, с заголовком `X-Device-Id: <server_key>`. После успешной отправки локальный файл удаляется. Если отправка не удалась, файл остается в директории фотографий и будет повторно отправлен следующим снимком, с учетом `screenshot.resend_limit`.
 
 `GET /api/menu/screenshot/take` делает снимок вручную и возвращает файл клиенту; этот метод не отправляет файл в core API.
 

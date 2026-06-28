@@ -109,6 +109,10 @@ var (
 	videoSyncRunningLock    sync.RWMutex
 	playlistSyncRunning     bool
 	playlistSyncRunningLock sync.RWMutex
+
+	playlistPhotoCaptureLock   sync.Mutex
+	playlistPhotoCaptureCancel context.CancelFunc
+	scheduledPhotoCaptureLock  sync.Mutex
 )
 
 func init() {
@@ -675,25 +679,10 @@ func StartScheduler() error {
 	cronScheduler = cron.New()
 	cronSchedulerLock.Unlock()
 
-	triggerStartupScreenshotCapture()
-
 	// Start scheduler goroutine
 	go schedulerLoop()
 
 	return nil
-}
-
-func triggerStartupScreenshotCapture() {
-	cfg := GetCurrentConfig()
-	if cfg.Screenshot.IntervalMinutes <= 0 {
-		return
-	}
-
-	go func() {
-		if err := runScreenshotCapture(); err != nil {
-			log.Printf("Failed to capture startup screenshot: %v", err)
-		}
-	}()
 }
 
 // schedulerLoop manages scheduled sync operations.
@@ -762,23 +751,25 @@ func schedulerLoop() {
 			}
 		}
 
-		// Add periodic screenshot capture task.
-		// SkipIfStillRunning ensures at most one ffmpeg process runs at a time:
-		// if a capture is still in progress when the next tick fires, that tick is dropped.
-		if config.Screenshot.IntervalMinutes > 0 {
-			cronSpec := fmt.Sprintf("@every %dm", config.Screenshot.IntervalMinutes)
-			screenshotJob := cron.NewChain(
-				cron.SkipIfStillRunning(cron.DiscardLogger),
-			).Then(cron.FuncJob(func() {
-				if err := runScreenshotCapture(); err != nil {
-					log.Printf("Failed to capture screenshot: %v", err)
-				}
-			}))
+		for _, restPair := range config.Schedule.Rest {
+			stopTime := strings.TrimSpace(restPair.Stop)
+			parts := strings.Split(stopTime, ":")
+			if len(parts) != 2 {
+				log.Printf("Warning: Invalid rest stop time format '%s', expected HH:MM", stopTime)
+				continue
+			}
+			scheduledStopTime := stopTime
+			cronSpec := fmt.Sprintf("%s %s * * *", parts[1], parts[0])
 			cronSchedulerLock.Lock()
-			_, err := cronScheduler.AddJob(cronSpec, screenshotJob)
+			_, err := cronScheduler.AddFunc(cronSpec, func() {
+				log.Printf("Running scheduled rest-end playback start at %s", scheduledStopTime)
+				if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
+					log.Printf("Failed to start playback after rest time ended: %v", err)
+				}
+			})
 			cronSchedulerLock.Unlock()
 			if err != nil {
-				log.Printf("Warning: Failed to schedule screenshot capture every %d minutes: %v", config.Screenshot.IntervalMinutes, err)
+				log.Printf("Warning: Failed to schedule rest-end playback start at %s: %v", scheduledStopTime, err)
 			}
 		}
 
@@ -793,11 +784,79 @@ func schedulerLoop() {
 	}
 }
 
+func schedulePlaylistPhotoCaptures() {
+	config := GetCurrentConfig()
+	durations, err := photoTimerDurations(config.Screenshot.Timers)
+	if err != nil {
+		cancelScheduledPlaylistPhotoCaptures()
+		log.Printf("Warning: invalid photo report timers; pending captures cancelled: %v", err)
+		return
+	}
+
+	schedulePlaylistPhotoCaptureDurations(durations)
+}
+
+func schedulePlaylistPhotoCaptureDurations(durations []time.Duration) {
+	playlistPhotoCaptureLock.Lock()
+	if playlistPhotoCaptureCancel != nil {
+		playlistPhotoCaptureCancel()
+		playlistPhotoCaptureCancel = nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	playlistPhotoCaptureCancel = cancel
+	playlistPhotoCaptureLock.Unlock()
+
+	for _, delay := range durations {
+		delay := delay
+		go func() {
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+				}
+			}
+
+			runScheduledPhotoCapture(ctx)
+		}()
+	}
+}
+
+func cancelScheduledPlaylistPhotoCaptures() {
+	playlistPhotoCaptureLock.Lock()
+	defer playlistPhotoCaptureLock.Unlock()
+	if playlistPhotoCaptureCancel != nil {
+		playlistPhotoCaptureCancel()
+		playlistPhotoCaptureCancel = nil
+	}
+}
+
+func runScheduledPhotoCapture(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	scheduledPhotoCaptureLock.Lock()
+	defer scheduledPhotoCaptureLock.Unlock()
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	if err := runScreenshotCapture(); err != nil {
+		log.Printf("Failed to capture playlist photo report: %v", err)
+	}
+}
+
 func captureScreenshot() error {
 	cfg := GetCurrentConfig()
-	if cfg.Screenshot.IntervalMinutes <= 0 {
-		return nil
-	}
 	pathTemplate := strings.TrimSpace(cfg.Screenshot.PathTemplate)
 	if pathTemplate == "" {
 		return fmt.Errorf("screenshot path template not configured")

@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -163,6 +164,106 @@ func TestHandlePlaybackStartMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestHandlePlaybackStartSchedulesPhotoReportTimers(t *testing.T) {
+	ServerKey = "test-key"
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/playback/start", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandlePlaybackStart(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected playback start to schedule photo report capture")
+	}
+}
+
+func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	if err := RestartVideoPlayService(); err != nil {
+		t.Fatalf("RestartVideoPlayService() error = %v", err)
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected playback restart to schedule photo report capture")
+	}
+}
+
+func TestStartPlaybackForPlaylistStartReturnsStartErrorWithoutSchedulingPhotoReport(t *testing.T) {
+	originalFactory := dbusFactory
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return nil, errors.New("dbus unavailable")
+	})
+
+	originalCapture := runScreenshotCapture
+	called := false
+	runScreenshotCapture = func() error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	if err := startPlaybackForPlaylistStart(context.Background()); err == nil {
+		t.Fatalf("expected start playback error")
+	}
+	if called {
+		t.Fatalf("did not expect photo report scheduling after playback start failure")
+	}
+}
+
 // (removed TestHandleStorageCheckMethodNotAllowed; storage-check endpoint replaced by system-status)
 
 func TestHandleServiceStatusMethodNotAllowed(t *testing.T) {
@@ -281,7 +382,7 @@ func TestHandleHealthOmitsServiceStatusWhenUnauthorized(t *testing.T) {
 	t.Cleanup(func() { ServerKey = originalKey })
 
 	tests := []struct {
-		name   string
+		name    string
 		setAuth func(req *http.Request)
 	}{
 		{"no auth header", func(req *http.Request) {}},
@@ -381,8 +482,8 @@ func TestHandleConfigurationGet(t *testing.T) {
 			Output: "hdmi",
 		},
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
+			Timers:       []string{"0:00:30", "0:30:00"},
+			PathTemplate: "/var/media-pi/screenshots/cam_$(date +%F_%H-%M-%S).jpg",
 		},
 	}
 
@@ -438,8 +539,8 @@ func TestHandleConfigurationGet(t *testing.T) {
 	if resp.Data.Audio.Output != "hdmi" {
 		t.Fatalf("expected hdmi output, got %s", resp.Data.Audio.Output)
 	}
-	if resp.Data.Screenshot.IntervalMinutes != 30 {
-		t.Fatalf("expected screenshot interval 30, got %d", resp.Data.Screenshot.IntervalMinutes)
+	if !reflect.DeepEqual([]string{"0:00:30", "0:30:00"}, resp.Data.Screenshot.Timers) {
+		t.Fatalf("unexpected photo report timers: %+v", resp.Data.Screenshot.Timers)
 	}
 }
 
@@ -508,7 +609,7 @@ WantedBy = multi-user.target
 		CrontabWriteFunc = originalWrite
 	})
 
-	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"},"screenshot":{"intervalMinutes":20}}`
+	body := `{"playlist":{"source":"/mnt/ya.disk/playlist/test/","destination":"/mnt/usb/playlist/"},"schedule":{"playlist":["6:05","16:28"],"video":["22:22"],"rest":[{"start":"12:00","stop":"13:00"},{"start":"23:45","stop":"07:00"}]},"audio":{"output":"jack"},"screenshot":{"timers":["0:30:00","0:00:30","0:30:00"]}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -559,6 +660,28 @@ WantedBy = multi-user.target
 		t.Fatalf("expected jack config, got %s", string(audioData))
 	}
 
+}
+
+func TestNormalizePhotoTimersTrimsSortsDeduplicatesAndCanonicalizes(t *testing.T) {
+	got, err := normalizePhotoTimers([]string{" 3:00:00 ", "00:00:30", "", "0:30:00", "0:30:00"})
+	if err != nil {
+		t.Fatalf("normalizePhotoTimers() error = %v", err)
+	}
+
+	expected := []string{"0:00:30", "0:30:00", "3:00:00"}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("expected %+v, got %+v", expected, got)
+	}
+}
+
+func TestNormalizePhotoTimersRejectsInvalidDurations(t *testing.T) {
+	for _, value := range []string{"bad", "1:60:00", "1:00:60", "x:00:00", "2562048:00:00"} {
+		t.Run(value, func(t *testing.T) {
+			if _, err := normalizePhotoTimers([]string{value}); err == nil {
+				t.Fatalf("expected %q to be rejected", value)
+			}
+		})
+	}
 }
 
 func TestWriteTimerScheduleProducesValidUnit(t *testing.T) {
@@ -619,7 +742,7 @@ func TestHandleConfigurationUploadValidation(t *testing.T) {
 	}
 }
 
-func TestHandleConfigurationUploadValidationRejectsNegativeScreenshotInterval(t *testing.T) {
+func TestHandleConfigurationUploadValidationRejectsInvalidPhotoTimer(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
@@ -643,7 +766,7 @@ func TestHandleConfigurationUploadValidationRejectsNegativeScreenshotInterval(t 
 		t.Fatalf("failed to seed service file: %v", err)
 	}
 
-	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["08:00"],"video":["08:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"intervalMinutes":-1}}`
+	body := `{"playlist":{"source":"","destination":"/mnt/usb"},"schedule":{"playlist":["08:00"],"video":["08:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"timers":["0:99:00"]}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -703,7 +826,7 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 	})
 
 	// Test with empty source - should use default
-	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"intervalMinutes":15}}`
+	body := `{"playlist":{"source":"","destination":"/mnt/usb/test/"},"schedule":{"playlist":["08:00"],"video":["12:00"],"rest":[]},"audio":{"output":"hdmi"},"screenshot":{"timers":["00:00:30","3:00:00","0:00:30"]}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer test-key")
 	w := httptest.NewRecorder()
@@ -724,12 +847,12 @@ func TestHandleConfigurationUpdateEmptySourceUsesDefault(t *testing.T) {
 		t.Errorf("expected default source 'media-pi.core server' in service file, got: %s", string(updatedService))
 	}
 
-	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
-		t.Errorf("expected screenshot interval 15 in config, got %d", cfg.Screenshot.IntervalMinutes)
+	if cfg := GetCurrentConfig(); !reflect.DeepEqual(cfg.Screenshot.Timers, []string{"0:00:30", "3:00:00"}) {
+		t.Errorf("unexpected photo report timers in config: %+v", cfg.Screenshot.Timers)
 	}
 }
 
-func TestHandleConfigurationUpdatePreservesScreenshotIntervalWhenOmitted(t *testing.T) {
+func TestHandleConfigurationUpdatePreservesPhotoTimersWhenOmitted(t *testing.T) {
 	ServerKey = "test-key"
 
 	tmp := t.TempDir()
@@ -762,7 +885,7 @@ func TestHandleConfigurationUpdatePreservesScreenshotIntervalWhenOmitted(t *test
 		Playlist:   PlaylistConfig{Source: "media-pi.core server", Destination: "/mnt/usb"},
 		Schedule:   ScheduleConfig{Playlist: []string{"08:00"}, Video: []string{"12:00"}},
 		Audio:      AudioConfig{Output: "hdmi"},
-		Screenshot: ScreenshotConfig{IntervalMinutes: 15, PathTemplate: "/tmp/cam.jpg", Input: "/dev/video0"},
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:30"}, PathTemplate: "/tmp/cam.jpg", Input: "/dev/video0"},
 	}
 	configMutex.Lock()
 	currentConfig = &config
@@ -788,8 +911,72 @@ func TestHandleConfigurationUpdatePreservesScreenshotIntervalWhenOmitted(t *test
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if cfg := GetCurrentConfig(); cfg.Screenshot.IntervalMinutes != 15 {
-		t.Fatalf("expected screenshot interval to remain 15, got %d", cfg.Screenshot.IntervalMinutes)
+	if cfg := GetCurrentConfig(); !reflect.DeepEqual(cfg.Screenshot.Timers, []string{"0:00:30"}) {
+		t.Fatalf("expected omitted screenshot timers to preserve config, got %+v", cfg.Screenshot.Timers)
+	}
+}
+
+func TestHandleConfigurationUpdateClearsPhotoTimersWithExplicitEmptyList(t *testing.T) {
+	ServerKey = "test-key"
+
+	tmp := t.TempDir()
+	servicePath := filepath.Join(tmp, "playlist.upload.service")
+	originalService := PlaylistServicePath
+	originalPlaylist := PlaylistTimerPath
+	originalVideo := VideoTimerPath
+	originalAudio := AudioConfigPath
+	originalCfgPath := ConfigPath
+	PlaylistServicePath = servicePath
+	PlaylistTimerPath = filepath.Join(tmp, "playlist.upload.timer")
+	VideoTimerPath = filepath.Join(tmp, "video.upload.timer")
+	AudioConfigPath = filepath.Join(tmp, "asound.conf")
+	ConfigPath = filepath.Join(tmp, "agent.yaml")
+	t.Cleanup(func() {
+		PlaylistServicePath = originalService
+		PlaylistTimerPath = originalPlaylist
+		VideoTimerPath = originalVideo
+		AudioConfigPath = originalAudio
+		ConfigPath = originalCfgPath
+	})
+
+	if err := os.WriteFile(servicePath, []byte("[Service]\nExecStart = /usr/bin/rsync /old/src /old/dst"), 0644); err != nil {
+		t.Fatalf("failed to seed service file: %v", err)
+	}
+
+	config := Config{
+		ServerKey:  "test-key",
+		ListenAddr: "0.0.0.0:8081",
+		Playlist:   PlaylistConfig{Source: "media-pi.core server", Destination: "/mnt/usb"},
+		Schedule:   ScheduleConfig{Playlist: []string{"08:00"}, Video: []string{"12:00"}},
+		Audio:      AudioConfig{Output: "hdmi"},
+		Screenshot: ScreenshotConfig{Timers: []string{"0:00:30"}, PathTemplate: "/tmp/cam.jpg", Input: "/dev/video0"},
+	}
+	configMutex.Lock()
+	currentConfig = &config
+	configMutex.Unlock()
+
+	originalRead := CrontabReadFunc
+	originalWrite := CrontabWriteFunc
+	CrontabReadFunc = func() (string, error) { return "", nil }
+	CrontabWriteFunc = func(string) error { return nil }
+	t.Cleanup(func() {
+		CrontabReadFunc = originalRead
+		CrontabWriteFunc = originalWrite
+	})
+
+	body := `{"playlist":{"source":"media-pi.core server","destination":"/mnt/usb/test/"},"schedule":{"playlist":["09:00"],"video":["13:00"],"rest":[]},"audio":{"output":"jack"},"screenshot":{"timers":[]}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/menu/configuration/update", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleConfigurationUpdate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if cfg := GetCurrentConfig(); len(cfg.Screenshot.Timers) != 0 {
+		t.Fatalf("expected explicit empty screenshot timers to clear config, got %+v", cfg.Screenshot.Timers)
 	}
 }
 
@@ -1090,9 +1277,9 @@ func TestHandleTakeScreenshotReturnsFileWithoutResend(t *testing.T) {
 	originalConfig := currentConfig
 	currentConfig = &Config{
 		Screenshot: ScreenshotConfig{
-			IntervalMinutes: 30,
-			PathTemplate:    pathTemplate,
-			Input:           "/dev/video0",
+			Timers:       []string{"0:00:30"},
+			PathTemplate: pathTemplate,
+			Input:        "/dev/video0",
 		},
 	}
 	configMutex.Unlock()
