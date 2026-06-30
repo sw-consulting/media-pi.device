@@ -603,7 +603,7 @@ func HandleListUnits(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
 	defer cancel()
 
 	var infos []UnitInfo
@@ -660,7 +660,7 @@ func HandleUnitStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
 	defer cancel()
 
 	props, err := conn.GetUnitPropertiesContext(ctx, unit)
@@ -716,7 +716,8 @@ func HandleUnitAction(action string) http.HandlerFunc {
 			return
 		}
 
-		conn, err := getDBusConnection(context.Background())
+		requestCtx := r.Context()
+		conn, err := getDBusConnection(requestCtx)
 		if err != nil {
 			JSONResponse(w, http.StatusInternalServerError, APIResponse{
 				OK:     false,
@@ -726,37 +727,26 @@ func HandleUnitAction(action string) http.HandlerFunc {
 		}
 		defer conn.Close()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
 		var result string
 		var actionErr error
 
 		switch action {
 		case "start":
-			ch := make(chan string, 1)
-			_, actionErr = conn.StartUnitContext(ctx, req.Unit, "replace", ch)
-			if actionErr == nil {
-				result = <-ch
-			}
+			result, actionErr = runDBusUnitOperation(requestCtx, conn, dbusUnitOperationStart, req.Unit)
 		case "stop":
-			ch := make(chan string, 1)
-			_, actionErr = conn.StopUnitContext(ctx, req.Unit, "replace", ch)
-			if actionErr == nil {
-				result = <-ch
-			}
+			result, actionErr = runDBusUnitOperation(requestCtx, conn, dbusUnitOperationStop, req.Unit)
 		case "restart":
-			ch := make(chan string, 1)
-			_, actionErr = conn.RestartUnitContext(ctx, req.Unit, "replace", ch)
-			if actionErr == nil {
-				result = <-ch
-			}
+			result, actionErr = runDBusUnitOperation(requestCtx, conn, dbusUnitOperationRestart, req.Unit)
 		case "enable":
+			ctx, cancel := context.WithTimeout(requestCtx, dbusOperationTimeout)
+			defer cancel()
 			_, _, actionErr = conn.EnableUnitFilesContext(ctx, []string{req.Unit}, false, true)
 			if actionErr == nil {
 				result = "enabled"
 			}
 		case "disable":
+			ctx, cancel := context.WithTimeout(requestCtx, dbusOperationTimeout)
+			defer cancel()
 			_, actionErr = conn.DisableUnitFilesContext(ctx, []string{req.Unit}, false)
 			if actionErr == nil {
 				result = "disabled"

@@ -70,9 +70,6 @@ var (
 	CrontabWriteFunc = defaultCrontabWrite
 	cronParser       = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	playbackTimeNow  = time.Now
-
-	playbackStartTimeout            = 10 * time.Second
-	playbackStartActiveCheckTimeout = 2 * time.Second
 )
 
 // MenuActionResponse is returned after performing a menu action.
@@ -261,7 +258,11 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := getDBusConnection(context.Background())
+	requestCtx := r.Context()
+	connCtx, cancel := context.WithTimeout(requestCtx, dbusOperationTimeout)
+	defer cancel()
+
+	conn, err := getDBusConnection(connCtx)
 	if err != nil {
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
@@ -271,27 +272,18 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	_, err = conn.StopUnitContext(ctx, "play.video.service", "replace", ch)
+	result, err := runDBusUnitOperation(requestCtx, conn, dbusUnitOperationStop, playbackServiceUnit)
 	if err != nil {
+		if errors.Is(err, errDBusUnitOperationTimeout) {
+			JSONResponse(w, http.StatusRequestTimeout, APIResponse{
+				OK:     false,
+				ErrMsg: "Таймаут остановки воспроизведения",
+			})
+			return
+		}
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось остановить воспроизведение: %v", err),
-		})
-		return
-	}
-
-	var result string
-	select {
-	case result = <-ch:
-		// proceed as normal
-	case <-ctx.Done():
-		JSONResponse(w, http.StatusRequestTimeout, APIResponse{
-			OK:     false,
-			ErrMsg: "Таймаут остановки воспроизведения",
 		})
 		return
 	}
@@ -402,42 +394,17 @@ func startPlaybackService(parent context.Context) error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(parent, playbackStartTimeout)
-	defer cancel()
-
-	ch := make(chan string, 1)
-	_, err = conn.StartUnitContext(ctx, "play.video.service", "replace", ch)
+	result, err := runDBusUnitOperation(parent, conn, dbusUnitOperationStart, playbackServiceUnit)
 	if err != nil {
+		if errors.Is(err, errDBusUnitOperationTimeout) {
+			return errors.New("таймаут запуска воспроизведения")
+		}
 		return err
 	}
-
-	select {
-	case result := <-ch:
-		if result != "done" {
-			return fmt.Errorf("unexpected start result: %s", result)
-		}
-		return nil
-	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
-			statusCtx, statusCancel := context.WithTimeout(parent, playbackStartActiveCheckTimeout)
-			defer statusCancel()
-			if isUnitActive(statusCtx, conn, "play.video.service") {
-				return nil
-			}
-		}
-		return errors.New("таймаут запуска воспроизведения")
+	if result != "done" {
+		return fmt.Errorf("unexpected start result: %s", result)
 	}
-}
-
-func isUnitActive(ctx context.Context, conn DBusConnection, unit string) bool {
-	props, err := conn.GetUnitPropertiesContext(ctx, unit)
-	if err != nil {
-		return false
-	}
-	if state, ok := props["ActiveState"].(string); ok {
-		return state == "active"
-	}
-	return false
+	return nil
 }
 
 func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
@@ -447,7 +414,7 @@ func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, dbusOperationTimeout)
 	defer cancel()
 
 	return ServiceStatusResponse{
@@ -799,7 +766,7 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
 	defer cancel()
 
 	err = conn.ReloadContext(ctx)
@@ -1040,32 +1007,28 @@ func HandleTakeScreenshot(w http.ResponseWriter, r *http.Request) {
 // RestartVideoPlayService restarts the play.video.service via D-Bus.
 // This function waits for the restart operation to complete and verifies the result.
 func RestartVideoPlayService() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	connCtx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
 	defer cancel()
 
-	conn, err := getDBusConnection(ctx)
+	conn, err := getDBusConnection(connCtx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to D-Bus: %w", err)
 	}
 	defer conn.Close()
 
-	ch := make(chan string, 1)
-	_, err = conn.RestartUnitContext(ctx, "play.video.service", "replace", ch)
+	result, err := runDBusUnitOperation(context.Background(), conn, dbusUnitOperationRestart, playbackServiceUnit)
 	if err != nil {
-		return fmt.Errorf("failed to restart play.video.service: %w", err)
+		if errors.Is(err, errDBusUnitOperationTimeout) {
+			return fmt.Errorf("restart timeout")
+		}
+		return fmt.Errorf("failed to restart %s: %w", playbackServiceUnit, err)
 	}
 
-	// Wait for result
-	select {
-	case result := <-ch:
-		if result != "done" {
-			return fmt.Errorf("restart failed with result: %s", result)
-		}
-		schedulePlaylistPhotoCaptures()
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("restart timeout")
+	if result != "done" {
+		return fmt.Errorf("restart failed with result: %s", result)
 	}
+	schedulePlaylistPhotoCaptures()
+	return nil
 }
 
 func sanitizeRestPairs(raw []RestTimePair) ([]RestTimePair, error) {
