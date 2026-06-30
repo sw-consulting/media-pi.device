@@ -1,0 +1,12 @@
+{
+    "go.toolsEnvVars": {
+        "GOOS": "linux",
+        "GOARCH": "arm",
+        "GOARM": "7"
+    },
+    "go.buildTags": "",
+    "go.testEnvVars": {},
+    "go.testFlags": ["-v"],
+    "go.coverOnSingleTest": true,
+    "go.coverOnSingleTestFile": true
+}

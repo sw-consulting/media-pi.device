@@ -19,7 +19,6 @@
 /vendor/
 
 # IDE/editor files
-.vscode/
 .idea/
 *.swp
 

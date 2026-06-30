@@ -1,0 +1,107 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-armhf",
+            "type": "shell",
+            "command": "go",
+            "args": [
+                "build",
+                "-o",
+                "build/media-pi-agent",
+                "-v",
+                "./cmd/media-pi"
+            ],
+            "options": {
+                "env": {
+                    "GOOS": "linux",
+                    "GOARCH": "arm",
+                    "GOARM": "7"
+                }
+            },
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true
+            },
+            "problemMatcher": "$go"
+        },
+        {
+            "label": "deploy-to-pi",
+            "type": "shell",
+            "command": "scp",
+            "args": [
+                "build/media-pi-agent",
+                "maxirmx@192.168.11.116:/home/maxirmx/media-pi-agent/"
+            ],
+            "dependsOn": ["build-armhf"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "run-remote",
+            "type": "shell",
+            "command": "ssh",
+            "args": [
+                "-tt",
+                "maxirmx@192.168.11.116",
+                "sudo env MEDIA_PI_AGENT_CONFIG=/etc/media-pi-agent/agent.yaml /home/maxirmx/media-pi-agent/media-pi-agent 2>&1 | tee /tmp/media-pi-agent.log"
+            ],
+            "dependsOn": [
+                "deploy-to-pi"
+            ],
+            "dependsOrder": "sequence",
+            "isBackground": true,
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "stop-remote",
+            "type": "shell",
+            "command": "ssh",
+            "args": [
+                "maxirmx@192.168.11.116",
+                "sudo pkill -x media-pi-agent"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "tail-remote-logs",
+            "type": "shell",
+            "command": "ssh",
+            "args": [
+                "maxirmx@192.168.11.116",
+                "journalctl -fu media-pi-agent 2>/dev/null || tail -f /tmp/media-pi-agent.log"
+            ],
+            "isBackground": true,
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
