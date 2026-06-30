@@ -258,12 +258,14 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("Stopping play.video.service on manual request")
 	requestCtx := r.Context()
 	connCtx, cancel := context.WithTimeout(requestCtx, dbusOperationTimeout)
 	defer cancel()
 
 	conn, err := getDBusConnection(connCtx)
 	if err != nil {
+		log.Printf("Failed to stop play.video.service on manual request: connect to D-Bus: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
@@ -275,12 +277,14 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 	result, err := runDBusUnitOperation(requestCtx, conn, dbusUnitOperationStop, playbackServiceUnit)
 	if err != nil {
 		if errors.Is(err, errDBusUnitOperationTimeout) {
+			log.Printf("Failed to stop play.video.service on manual request: timeout")
 			JSONResponse(w, http.StatusRequestTimeout, APIResponse{
 				OK:     false,
 				ErrMsg: "Таймаут остановки воспроизведения",
 			})
 			return
 		}
+		log.Printf("Failed to stop play.video.service on manual request: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось остановить воспроизведение: %v", err),
@@ -288,6 +292,7 @@ func HandlePlaybackStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("Stopped play.video.service on manual request")
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
@@ -304,7 +309,9 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
+	log.Println("Starting play.video.service on manual request")
+	if err := startPlaybackForPlaylistStart(r.Context()); err != nil {
+		log.Printf("Failed to start play.video.service on manual request: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось запустить воспроизведение: %v", err),
@@ -312,6 +319,7 @@ func HandlePlaybackStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("Started play.video.service on manual request")
 	JSONResponse(w, http.StatusOK, APIResponse{
 		OK: true,
 		Data: MenuActionResponse{
@@ -335,6 +343,7 @@ func ensurePlaybackStateOnStartupAt(now time.Time) error {
 		return nil
 	}
 
+	log.Printf("Starting play.video.service on startup")
 	if err := startPlaybackForPlaylistStart(context.Background()); err != nil {
 		return fmt.Errorf("start play.video.service on startup: %w", err)
 	}
@@ -874,7 +883,9 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 		log.Println("Playlist sync completed, restarting play.video.service")
 		if err := RestartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart play.video.service: %v", err)
+			return
 		}
+		log.Println("Playlist sync completed, restarted play.video.service")
 	})
 
 	if err != nil {

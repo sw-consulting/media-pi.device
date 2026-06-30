@@ -4,9 +4,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,22 @@ import (
 	"testing"
 	"time"
 )
+
+func captureTestLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var logs bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	})
+
+	return &logs
+}
 
 func TestHandleMenuList(t *testing.T) {
 	ServerKey = "test-key"
@@ -166,6 +184,7 @@ func TestHandlePlaybackStartMethodNotAllowed(t *testing.T) {
 
 func TestHandlePlaybackStartSchedulesPhotoReportTimers(t *testing.T) {
 	ServerKey = "test-key"
+	logs := captureTestLogs(t)
 
 	configMutex.Lock()
 	originalConfig := currentConfig
@@ -196,6 +215,12 @@ func TestHandlePlaybackStartSchedulesPhotoReportTimers(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(logs.String(), "Starting play.video.service on manual request") {
+		t.Fatalf("expected manual playback start log, got %q", logs.String())
+	}
+	if !strings.Contains(logs.String(), "Started play.video.service on manual request") {
+		t.Fatalf("expected manual playback started log, got %q", logs.String())
 	}
 
 	select {
@@ -470,6 +495,7 @@ func TestHandlePlaybackStopAcceptsInactiveServiceAfterDBusTimeout(t *testing.T) 
 		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
 	})
 
+	logs := captureTestLogs(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/playback/stop", nil)
 	w := httptest.NewRecorder()
 
@@ -483,6 +509,12 @@ func TestHandlePlaybackStopAcceptsInactiveServiceAfterDBusTimeout(t *testing.T) 
 	}
 	if !conn.unitPropertiesRequested {
 		t.Fatalf("expected active-state check after DBus stop timeout")
+	}
+	if !strings.Contains(logs.String(), "Stopping play.video.service on manual request") {
+		t.Fatalf("expected manual playback stop log, got %q", logs.String())
+	}
+	if !strings.Contains(logs.String(), "Stopped play.video.service on manual request") {
+		t.Fatalf("expected manual playback stopped log, got %q", logs.String())
 	}
 }
 
