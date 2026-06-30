@@ -10,7 +10,9 @@
 package main
 
 import (
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -78,6 +80,7 @@ func main() {
 	if err := agent.StartScheduler(); err != nil {
 		log.Fatalf("Failed to start scheduler: %v", err)
 	}
+	log.Println("Started sync scheduler")
 
 	if err := agent.EnsurePlaybackStateOnStartup(); err != nil {
 		log.Printf("Warning: Failed to ensure playback startup state: %v", err)
@@ -85,12 +88,14 @@ func main() {
 
 	// Set callback to restart play.video service after scheduled playlist syncs
 	agent.SetScheduledSyncCallback(func() {
-		log.Println("Scheduled sync completed, restarting play.video service")
+		log.Println("Scheduled sync completed, restarting play.video.service")
 		// Use D-Bus to restart the service with proper result checking
 		// This is a best-effort operation, log errors but don't fail
 		if err := agent.RestartVideoPlayService(); err != nil {
-			log.Printf("Warning: Failed to restart play.video service after scheduled sync: %v", err)
+			log.Printf("Warning: Failed to restart play.video.service after scheduled sync: %v", err)
+			return
 		}
+		log.Println("Scheduled sync completed, restarted play.video.service")
 	})
 
 	mux := http.NewServeMux()
@@ -125,8 +130,6 @@ func main() {
 	if listenAddr == "" {
 		listenAddr = agent.DefaultListenAddr
 	}
-	log.Printf("Starting Media Pi Agent service on %s", listenAddr)
-
 	server := &http.Server{
 		Addr:         listenAddr,
 		Handler:      mux,
@@ -135,6 +138,13 @@ func main() {
 		IdleTimeout:  serverIdleTimeout,
 	}
 
+	log.Printf("Starting Media Pi Agent service on %s", listenAddr)
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Fatalf("Failed to start Media Pi Agent service on %s: %v", listenAddr, err)
+	}
+	log.Printf("Started Media Pi Agent service on %s", listenAddr)
+
 	// Handle SIGHUP to reload configuration without restarting the process.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGHUP)
@@ -142,13 +152,13 @@ func main() {
 		for range sigs {
 			log.Printf("Received SIGHUP, reloading configuration")
 			if err := agent.ReloadConfig(); err != nil {
-				log.Printf("Reload failed: %v", err)
+				log.Printf("Failed to reload configuration: %v", err)
 			} else {
-				log.Printf("Configuration reloaded")
+				log.Printf("Reloaded configuration")
 			}
 		}
 	}()
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("Media Pi Agent service failed: %v", err)
 	}
 }

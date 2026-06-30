@@ -37,7 +37,7 @@ var (
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("ffmpeg command failed: %w: %s", err, strings.TrimSpace(string(out)))
 		}
-		log.Printf("Debug: created device screenshot at %s", outputPath)
+		log.Printf("Created device screenshot at %s", outputPath)
 		return nil
 	}
 	screenshotNow = time.Now
@@ -458,11 +458,18 @@ func garbageCollect(mediaDir string, expectedFiles map[string]struct{}) error {
 }
 
 // PerformSync performs a video sync operation.
-func PerformSync(ctx context.Context) error {
+func PerformSync(ctx context.Context) (err error) {
 	config := GetCurrentConfig()
 
 	log.Println("Starting video sync")
 	startTime := time.Now()
+	defer func() {
+		if err != nil {
+			log.Printf("Video sync failed: %v", err)
+			return
+		}
+		log.Println("Video sync completed successfully")
+	}()
 
 	manifest, err := fetchManifest(ctx, config)
 	if err != nil {
@@ -491,7 +498,6 @@ func PerformSync(ctx context.Context) error {
 		Error:        "",
 	})
 
-	log.Println("Sync completed successfully")
 	return nil
 }
 
@@ -529,9 +535,7 @@ func TriggerSync(callback func()) error {
 	go func() {
 		setVideoSyncRunning(true)
 		defer setVideoSyncRunning(false)
-		if err := PerformSync(ctx); err != nil {
-			log.Printf("Sync error: %v", err)
-		} else if callback != nil {
+		if err := PerformSync(ctx); err == nil && callback != nil {
 			callback()
 		}
 	}()
@@ -573,10 +577,7 @@ func TriggerPlaylistSync(callback func()) error {
 	go func() {
 		setPlaylistSyncRunning(true)
 		defer setPlaylistSyncRunning(false)
-		log.Println("Starting playlist sync")
-		if err := PerformPlaylistSync(ctx); err != nil {
-			log.Printf("Playlist sync error: %v", err)
-		} else if callback != nil {
+		if err := PerformPlaylistSync(ctx); err == nil && callback != nil {
 			callback()
 		}
 	}()
@@ -633,8 +634,17 @@ func downloadPlaylist(ctx context.Context, config Config) ([]byte, error) {
 }
 
 // PerformPlaylistSync downloads the playlist and optionally saves it.
-func PerformPlaylistSync(ctx context.Context) error {
+func PerformPlaylistSync(ctx context.Context) (err error) {
 	config := GetCurrentConfig()
+
+	log.Println("Starting playlist sync")
+	defer func() {
+		if err != nil {
+			log.Printf("Playlist sync failed: %v", err)
+			return
+		}
+		log.Println("Playlist sync completed successfully")
+	}()
 
 	data, err := downloadPlaylist(ctx, config)
 	if err != nil {
@@ -667,7 +677,6 @@ func PerformPlaylistSync(ctx context.Context) error {
 		log.Printf("Playlist saved to %s", destPath)
 	}
 
-	log.Println("Playlist sync completed successfully")
 	return nil
 }
 
@@ -690,6 +699,7 @@ func StartScheduler() error {
 // - Playlist schedule: downloads playlist only and restarts play service
 // - Video schedule: downloads video files only (no playlist, no restart)
 func schedulerLoop() {
+	reloading := false
 	for {
 		config := GetCurrentConfig()
 
@@ -774,10 +784,14 @@ func schedulerLoop() {
 		cronSchedulerLock.Lock()
 		cronScheduler.Start()
 		cronSchedulerLock.Unlock()
+		if reloading {
+			log.Println("Reloaded sync schedule")
+		}
 
 		// Wait for reload signal
 		<-syncReloadChan
 		log.Println("Reloading sync schedule")
+		reloading = true
 	}
 }
 
@@ -889,7 +903,7 @@ func captureScreenshot() error {
 		return fmt.Errorf("delete uploaded screenshot %q: %w", outputPath, err)
 	}
 
-	log.Printf("Debug: uploaded and removed screenshot %s", outputPath)
+	log.Printf("Uploaded and removed screenshot %s", outputPath)
 	return nil
 }
 
@@ -941,7 +955,7 @@ func resendPendingScreenshots(ctx context.Context, config Config, screenshotDir,
 			resendErrors = append(resendErrors, fmt.Sprintf("%s: delete failed: %v", path, err))
 			continue
 		}
-		log.Printf("Debug: resent and removed pending screenshot %s", path)
+		log.Printf("Resent and removed pending screenshot %s", path)
 	}
 
 	if len(resendErrors) > 0 {
