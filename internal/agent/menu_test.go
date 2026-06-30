@@ -209,6 +209,8 @@ type startPlaybackTimeoutConn struct {
 	noopDBusConnection
 	activeState             string
 	startedUnits            []string
+	stoppedUnits            []string
+	restartedUnits          []string
 	unitPropertiesRequested bool
 }
 
@@ -217,9 +219,39 @@ func (c *startPlaybackTimeoutConn) StartUnitContext(ctx context.Context, name, m
 	return 1, nil
 }
 
+func (c *startPlaybackTimeoutConn) StopUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.stoppedUnits = append(c.stoppedUnits, name)
+	return 1, nil
+}
+
+func (c *startPlaybackTimeoutConn) RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.restartedUnits = append(c.restartedUnits, name)
+	return 1, nil
+}
+
 func (c *startPlaybackTimeoutConn) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
 	c.unitPropertiesRequested = true
 	return map[string]any{"ActiveState": c.activeState}, nil
+}
+
+type unitActionCanceledContextConn struct {
+	noopDBusConnection
+	sawCanceledContext bool
+}
+
+func (c *unitActionCanceledContextConn) StartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.sawCanceledContext = errors.Is(ctx.Err(), context.Canceled)
+	return 0, ctx.Err()
+}
+
+type playbackStopCanceledContextConn struct {
+	noopDBusConnection
+	sawCanceledContext bool
+}
+
+func (c *playbackStopCanceledContextConn) StopUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.sawCanceledContext = errors.Is(ctx.Err(), context.Canceled)
+	return 0, ctx.Err()
 }
 
 func TestStartPlaybackForPlaylistStartAcceptsActiveServiceAfterDBusTimeoutAndSchedulesPhotoReport(t *testing.T) {
@@ -229,10 +261,10 @@ func TestStartPlaybackForPlaylistStartAcceptsActiveServiceAfterDBusTimeoutAndSch
 		return conn, nil
 	})
 
-	originalStartTimeout := playbackStartTimeout
-	originalActiveCheckTimeout := playbackStartActiveCheckTimeout
-	playbackStartTimeout = time.Millisecond
-	playbackStartActiveCheckTimeout = 50 * time.Millisecond
+	originalOperationTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	playbackServiceOperationTimeout = time.Millisecond
+	playbackServiceActiveCheckTimeout = 50 * time.Millisecond
 
 	configMutex.Lock()
 	originalConfig := currentConfig
@@ -250,8 +282,8 @@ func TestStartPlaybackForPlaylistStartAcceptsActiveServiceAfterDBusTimeoutAndSch
 
 	t.Cleanup(func() {
 		SetDBusConnectionFactory(originalFactory)
-		playbackStartTimeout = originalStartTimeout
-		playbackStartActiveCheckTimeout = originalActiveCheckTimeout
+		playbackServiceOperationTimeout = originalOperationTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
 		configMutex.Lock()
 		currentConfig = originalConfig
 		configMutex.Unlock()
@@ -284,15 +316,15 @@ func TestStartPlaybackServiceReturnsTimeoutWhenDBusTimesOutAndServiceInactive(t 
 		return conn, nil
 	})
 
-	originalStartTimeout := playbackStartTimeout
-	originalActiveCheckTimeout := playbackStartActiveCheckTimeout
-	playbackStartTimeout = time.Millisecond
-	playbackStartActiveCheckTimeout = 50 * time.Millisecond
+	originalOperationTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	playbackServiceOperationTimeout = time.Millisecond
+	playbackServiceActiveCheckTimeout = 50 * time.Millisecond
 
 	t.Cleanup(func() {
 		SetDBusConnectionFactory(originalFactory)
-		playbackStartTimeout = originalStartTimeout
-		playbackStartActiveCheckTimeout = originalActiveCheckTimeout
+		playbackServiceOperationTimeout = originalOperationTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
 	})
 
 	err := startPlaybackService(context.Background())
@@ -308,6 +340,11 @@ func TestStartPlaybackServiceReturnsTimeoutWhenDBusTimesOutAndServiceInactive(t 
 }
 
 func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
+	originalFactory := dbusFactory
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return &noopDBusConnection{}, nil
+	})
+
 	configMutex.Lock()
 	originalConfig := currentConfig
 	currentConfig = &Config{
@@ -322,6 +359,7 @@ func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
 		configMutex.Lock()
 		currentConfig = originalConfig
 		configMutex.Unlock()
@@ -337,6 +375,211 @@ func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
 	case <-called:
 	case <-time.After(time.Second):
 		t.Fatalf("expected playback restart to schedule photo report capture")
+	}
+}
+
+func TestRestartVideoPlayServiceUsesTimeoutForDBusConnection(t *testing.T) {
+	originalFactory := dbusFactory
+	factorySawDeadline := false
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		_, factorySawDeadline = ctx.Deadline()
+		return &noopDBusConnection{}, nil
+	})
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+	})
+
+	if err := RestartVideoPlayService(); err != nil {
+		t.Fatalf("RestartVideoPlayService() error = %v", err)
+	}
+	if !factorySawDeadline {
+		t.Fatalf("expected D-Bus connection context to have a timeout deadline")
+	}
+}
+
+func TestRestartVideoPlayServiceAcceptsActiveServiceAfterDBusTimeoutAndSchedulesPhotoReport(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &startPlaybackTimeoutConn{activeState: "active"}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalOperationTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	playbackServiceOperationTimeout = time.Millisecond
+	playbackServiceActiveCheckTimeout = 50 * time.Millisecond
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		playbackServiceOperationTimeout = originalOperationTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	if err := RestartVideoPlayService(); err != nil {
+		t.Fatalf("RestartVideoPlayService() error = %v", err)
+	}
+	if !reflect.DeepEqual(conn.restartedUnits, []string{"play.video.service"}) {
+		t.Fatalf("unexpected restarted units: %+v", conn.restartedUnits)
+	}
+	if !conn.unitPropertiesRequested {
+		t.Fatalf("expected active-state check after DBus restart timeout")
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected photo report capture after active playback restart")
+	}
+}
+
+func TestHandlePlaybackStopAcceptsInactiveServiceAfterDBusTimeout(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &startPlaybackTimeoutConn{activeState: "inactive"}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalOperationTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	playbackServiceOperationTimeout = time.Millisecond
+	playbackServiceActiveCheckTimeout = 50 * time.Millisecond
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		playbackServiceOperationTimeout = originalOperationTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/playback/stop", nil)
+	w := httptest.NewRecorder()
+
+	HandlePlaybackStop(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(conn.stoppedUnits, []string{"play.video.service"}) {
+		t.Fatalf("unexpected stopped units: %+v", conn.stoppedUnits)
+	}
+	if !conn.unitPropertiesRequested {
+		t.Fatalf("expected active-state check after DBus stop timeout")
+	}
+}
+
+func TestHandlePlaybackStopPropagatesRequestCancellation(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &playbackStopCanceledContextConn{}
+	factorySawCanceledContext := false
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		factorySawCanceledContext = errors.Is(ctx.Err(), context.Canceled)
+		return conn, nil
+	})
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/playback/stop", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	HandlePlaybackStop(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !factorySawCanceledContext {
+		t.Fatalf("expected D-Bus factory to receive canceled request context")
+	}
+	if !conn.sawCanceledContext {
+		t.Fatalf("expected playback stop to receive canceled request context")
+	}
+}
+
+func TestHandleUnitActionTimeoutForOtherUnitDoesNotCheckActiveState(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &startPlaybackTimeoutConn{activeState: "active"}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalOperationTimeout := dbusOperationTimeout
+	originalAllowedUnits := AllowedUnits
+	dbusOperationTimeout = time.Millisecond
+	AllowedUnits = map[string]struct{}{"other.service": {}}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		dbusOperationTimeout = originalOperationTimeout
+		AllowedUnits = originalAllowedUnits
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/units/start", strings.NewReader(`{"unit":"other.service"}`))
+	w := httptest.NewRecorder()
+
+	HandleUnitAction("start")(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(conn.startedUnits, []string{"other.service"}) {
+		t.Fatalf("unexpected started units: %+v", conn.startedUnits)
+	}
+	if conn.unitPropertiesRequested {
+		t.Fatalf("did not expect active-state check for non-playback unit")
+	}
+}
+
+func TestHandleUnitActionStartPropagatesRequestCancellation(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &unitActionCanceledContextConn{}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalAllowedUnits := AllowedUnits
+	AllowedUnits = map[string]struct{}{"other.service": {}}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		AllowedUnits = originalAllowedUnits
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/units/start", strings.NewReader(`{"unit":"other.service"}`))
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	HandleUnitAction("start")(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !conn.sawCanceledContext {
+		t.Fatalf("expected D-Bus start to receive canceled request context")
 	}
 }
 
