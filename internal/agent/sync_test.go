@@ -680,6 +680,65 @@ func TestPerformPlaylistSync(t *testing.T) {
 	}
 }
 
+func TestTriggerPlaylistSyncMarksStoppedBeforeCallback(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/devicesync/playlist" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("test playlist"))
+	}))
+	defer server.Close()
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-key",
+		Playlist: PlaylistConfig{
+			Destination: tmpDir,
+		},
+	}
+	configMutex.Unlock()
+	setPlaylistSyncRunning(false)
+
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		setPlaylistSyncRunning(false)
+
+		syncLock.Lock()
+		if syncCancel != nil {
+			syncCancel()
+		}
+		syncContext, syncCancel = context.WithCancel(context.Background())
+		syncLock.Unlock()
+	})
+
+	callbackRunningState := make(chan bool, 1)
+	if err := TriggerPlaylistSync(func() {
+		callbackRunningState <- IsPlaylistSyncRunning()
+	}); err != nil {
+		t.Fatalf("TriggerPlaylistSync() error = %v", err)
+	}
+
+	select {
+	case running := <-callbackRunningState:
+		if running {
+			t.Fatalf("expected playlist sync to be marked stopped before callback")
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("expected playlist sync callback")
+	}
+
+	if IsPlaylistSyncRunning() {
+		t.Fatalf("expected playlist sync to remain stopped after callback")
+	}
+}
+
 func TestPlaylistFilenameIsAlwaysPlaylistM3u(t *testing.T) {
 	tmpDir := t.TempDir()
 

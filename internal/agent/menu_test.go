@@ -259,6 +259,24 @@ func (c *startPlaybackTimeoutConn) GetUnitPropertiesContext(ctx context.Context,
 	return map[string]any{"ActiveState": c.activeState}, nil
 }
 
+type restartConnectionLifetimeConn struct {
+	noopDBusConnection
+	connCtx                 context.Context
+	unitPropertiesRequested bool
+}
+
+func (c *restartConnectionLifetimeConn) RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	return 1, nil
+}
+
+func (c *restartConnectionLifetimeConn) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
+	c.unitPropertiesRequested = true
+	if err := c.connCtx.Err(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ActiveState": "active"}, nil
+}
+
 type unitActionCanceledContextConn struct {
 	noopDBusConnection
 	sawCanceledContext bool
@@ -406,8 +424,9 @@ func TestRestartVideoPlayServiceSchedulesPhotoReportTimers(t *testing.T) {
 func TestRestartVideoPlayServiceUsesTimeoutForDBusConnection(t *testing.T) {
 	originalFactory := dbusFactory
 	factorySawDeadline := false
+	var factoryDeadline time.Time
 	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
-		_, factorySawDeadline = ctx.Deadline()
+		factoryDeadline, factorySawDeadline = ctx.Deadline()
 		return &noopDBusConnection{}, nil
 	})
 
@@ -415,11 +434,47 @@ func TestRestartVideoPlayServiceUsesTimeoutForDBusConnection(t *testing.T) {
 		SetDBusConnectionFactory(originalFactory)
 	})
 
+	startedAt := time.Now()
 	if err := RestartVideoPlayService(); err != nil {
 		t.Fatalf("RestartVideoPlayService() error = %v", err)
 	}
 	if !factorySawDeadline {
 		t.Fatalf("expected D-Bus connection context to have a timeout deadline")
+	}
+	expectedDeadline := startedAt.Add(playbackServiceOperationTimeout + playbackServiceActiveCheckTimeout)
+	if factoryDeadline.Before(expectedDeadline) {
+		t.Fatalf("expected D-Bus connection deadline at least %s, got %s", expectedDeadline, factoryDeadline)
+	}
+}
+
+func TestRestartVideoPlayServiceConnectionOutlivesGenericTimeoutDuringPlaybackFallback(t *testing.T) {
+	originalFactory := dbusFactory
+	conn := &restartConnectionLifetimeConn{}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		conn.connCtx = ctx
+		return conn, nil
+	})
+
+	originalDBusTimeout := dbusOperationTimeout
+	originalOperationTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	dbusOperationTimeout = time.Millisecond
+	playbackServiceOperationTimeout = 20 * time.Millisecond
+	playbackServiceActiveCheckTimeout = 100 * time.Millisecond
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		dbusOperationTimeout = originalDBusTimeout
+		playbackServiceOperationTimeout = originalOperationTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	if err := RestartVideoPlayService(); err != nil {
+		t.Fatalf("RestartVideoPlayService() error = %v", err)
+	}
+	if !conn.unitPropertiesRequested {
+		t.Fatalf("expected active-state check after DBus restart timeout")
 	}
 }
 
