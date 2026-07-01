@@ -768,7 +768,11 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("Reloading systemd daemon configuration")
-	conn, err := getDBusConnection(context.Background())
+	requestCtx := r.Context()
+	connCtx, cancelConn := context.WithTimeout(requestCtx, dbusOperationTimeout)
+	defer cancelConn()
+
+	conn, err := getDBusConnection(connCtx)
 	if err != nil {
 		log.Printf("Failed to reload systemd daemon configuration: connect to D-Bus: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
@@ -779,7 +783,7 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
+	ctx, cancel := context.WithTimeout(requestCtx, dbusOperationTimeout)
 	defer cancel()
 
 	err = conn.ReloadContext(ctx)

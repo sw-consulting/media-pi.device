@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
 )
@@ -79,5 +80,64 @@ func TestHandleSystemReload_UsesInjectedDBusFactory(t *testing.T) {
 	}
 	if !fake.calledRestart {
 		t.Fatalf("expected RestartUnitContext to be called on injected DBus connection")
+	}
+}
+
+func TestHandleSystemReloadUsesNormalTimeoutForDBusConnection(t *testing.T) {
+	originalFactory := dbusFactory
+	fake := &fakeConn{}
+	var connectionTimeouts []time.Duration
+
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatalf("expected D-Bus connection context to have a deadline")
+		}
+		connectionTimeouts = append(connectionTimeouts, time.Until(deadline))
+		return fake, nil
+	})
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{}
+	configMutex.Unlock()
+
+	originalDBusTimeout := dbusOperationTimeout
+	originalPlaybackTimeout := playbackServiceOperationTimeout
+	originalActiveCheckTimeout := playbackServiceActiveCheckTimeout
+	dbusOperationTimeout = 50 * time.Millisecond
+	playbackServiceOperationTimeout = time.Second
+	playbackServiceActiveCheckTimeout = time.Second
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		dbusOperationTimeout = originalDBusTimeout
+		playbackServiceOperationTimeout = originalPlaybackTimeout
+		playbackServiceActiveCheckTimeout = originalActiveCheckTimeout
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
+	rr := httptest.NewRecorder()
+
+	HandleSystemReload(rr, req)
+
+	if rr.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200 OK, got %d", rr.Result().StatusCode)
+	}
+	if len(connectionTimeouts) < 2 {
+		t.Fatalf("expected reload and playback restart D-Bus connections, got %d", len(connectionTimeouts))
+	}
+
+	reloadTimeout := connectionTimeouts[0]
+	playbackTimeout := connectionTimeouts[1]
+	if reloadTimeout > dbusOperationTimeout+50*time.Millisecond {
+		t.Fatalf("expected reload D-Bus connection to use normal timeout %s, got %s", dbusOperationTimeout, reloadTimeout)
+	}
+	if playbackTimeout <= dbusOperationTimeout+50*time.Millisecond {
+		t.Fatalf("expected playback restart D-Bus connection to use longer playback timeout, got %s", playbackTimeout)
 	}
 }
