@@ -297,6 +297,30 @@ func (c *playbackStopCanceledContextConn) StopUnitContext(ctx context.Context, n
 	return 0, ctx.Err()
 }
 
+type systemReloadPlaybackConn struct {
+	noopDBusConnection
+	reloadErr      error
+	restartErr     error
+	calledReload   bool
+	restartedUnits []string
+}
+
+func (c *systemReloadPlaybackConn) ReloadContext(ctx context.Context) error {
+	c.calledReload = true
+	return c.reloadErr
+}
+
+func (c *systemReloadPlaybackConn) RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
+	c.restartedUnits = append(c.restartedUnits, name)
+	if c.restartErr != nil {
+		return 0, c.restartErr
+	}
+	if ch != nil {
+		ch <- "done"
+	}
+	return 1, nil
+}
+
 func TestStartPlaybackForPlaylistStartAcceptsActiveServiceAfterDBusTimeoutAndSchedulesPhotoReport(t *testing.T) {
 	originalFactory := dbusFactory
 	conn := &startPlaybackTimeoutConn{activeState: "active"}
@@ -1430,6 +1454,262 @@ func TestHandleSystemReloadMethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleSystemReloadOutsideRestIntervalRestartsPlaybackAndSchedulesPhotoReports(t *testing.T) {
+	ServerKey = "test-key"
+	logs := captureTestLogs(t)
+
+	originalFactory := dbusFactory
+	conn := &systemReloadPlaybackConn{}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Schedule: ScheduleConfig{
+			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
+		},
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalPlaybackTimeNow := playbackTimeNow
+	playbackTimeNow = func() time.Time {
+		return time.Date(2026, time.April, 29, 8, 30, 0, 0, time.Local)
+	}
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		playbackTimeNow = originalPlaybackTimeNow
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleSystemReload(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !conn.calledReload {
+		t.Fatalf("expected systemd daemon reload")
+	}
+	if !reflect.DeepEqual(conn.restartedUnits, []string{"play.video.service"}) {
+		t.Fatalf("unexpected restarted units: %+v", conn.restartedUnits)
+	}
+
+	for _, expected := range []string{
+		"Reloading systemd daemon configuration",
+		"Reloaded systemd daemon configuration",
+		"Restarting play.video.service after systemd daemon reload",
+		"Restarted play.video.service after systemd daemon reload",
+	} {
+		if !strings.Contains(logs.String(), expected) {
+			t.Fatalf("expected log %q, got %q", expected, logs.String())
+		}
+	}
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatalf("expected system reload playback restart to schedule photo report timers")
+	}
+}
+
+func TestHandleSystemReloadInsideRestIntervalSkipsPlaybackRestartAndPhotoReports(t *testing.T) {
+	ServerKey = "test-key"
+	logs := captureTestLogs(t)
+
+	originalFactory := dbusFactory
+	conn := &systemReloadPlaybackConn{}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Schedule: ScheduleConfig{
+			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
+		},
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalPlaybackTimeNow := playbackTimeNow
+	playbackTimeNow = func() time.Time {
+		return time.Date(2026, time.April, 29, 23, 30, 0, 0, time.Local)
+	}
+
+	originalCapture := runScreenshotCapture
+	called := make(chan struct{}, 1)
+	runScreenshotCapture = func() error {
+		called <- struct{}{}
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		playbackTimeNow = originalPlaybackTimeNow
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleSystemReload(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !conn.calledReload {
+		t.Fatalf("expected systemd daemon reload")
+	}
+	if len(conn.restartedUnits) != 0 {
+		t.Fatalf("expected playback restart to be skipped, got %+v", conn.restartedUnits)
+	}
+	if !strings.Contains(logs.String(), "Skipping play.video.service restart after systemd daemon reload at 23:30 because configuration is within a rest interval") {
+		t.Fatalf("expected rest skip log, got %q", logs.String())
+	}
+
+	select {
+	case <-called:
+		t.Fatalf("expected photo report timers not to be scheduled during rest interval")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestHandleSystemReloadFailureLogsErrorAndSkipsPlaybackRestart(t *testing.T) {
+	ServerKey = "test-key"
+	logs := captureTestLogs(t)
+
+	originalFactory := dbusFactory
+	conn := &systemReloadPlaybackConn{reloadErr: errors.New("reload failed")}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	originalCapture := runScreenshotCapture
+	called := false
+	runScreenshotCapture = func() error {
+		called = true
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleSystemReload(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !conn.calledReload {
+		t.Fatalf("expected systemd daemon reload attempt")
+	}
+	if len(conn.restartedUnits) != 0 {
+		t.Fatalf("expected playback restart to be skipped after reload failure, got %+v", conn.restartedUnits)
+	}
+	if called {
+		t.Fatalf("did not expect photo report scheduling after reload failure")
+	}
+	if !strings.Contains(logs.String(), "Failed to reload systemd daemon configuration: reload failed") {
+		t.Fatalf("expected reload failure log, got %q", logs.String())
+	}
+}
+
+func TestHandleSystemReloadPlaybackRestartFailureLogsErrorAndReturnsFailure(t *testing.T) {
+	ServerKey = "test-key"
+	logs := captureTestLogs(t)
+
+	originalFactory := dbusFactory
+	conn := &systemReloadPlaybackConn{restartErr: errors.New("restart failed")}
+	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
+		return conn, nil
+	})
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		Schedule: ScheduleConfig{
+			Rest: []RestTimePairConfig{{Start: "23:00", Stop: "07:00"}},
+		},
+		Screenshot: ScreenshotConfig{Timers: []string{"00:00:00"}},
+	}
+	configMutex.Unlock()
+
+	originalPlaybackTimeNow := playbackTimeNow
+	playbackTimeNow = func() time.Time {
+		return time.Date(2026, time.April, 29, 8, 30, 0, 0, time.Local)
+	}
+
+	originalCapture := runScreenshotCapture
+	called := false
+	runScreenshotCapture = func() error {
+		called = true
+		return nil
+	}
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(originalFactory)
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		playbackTimeNow = originalPlaybackTimeNow
+		runScreenshotCapture = originalCapture
+		cancelScheduledPlaylistPhotoCaptures()
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+
+	HandleSystemReload(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !conn.calledReload {
+		t.Fatalf("expected systemd daemon reload")
+	}
+	if !reflect.DeepEqual(conn.restartedUnits, []string{"play.video.service"}) {
+		t.Fatalf("unexpected restarted units: %+v", conn.restartedUnits)
+	}
+	if called {
+		t.Fatalf("did not expect photo report scheduling after playback restart failure")
+	}
+	if !strings.Contains(logs.String(), "Failed to restart play.video.service after systemd daemon reload") ||
+		!strings.Contains(logs.String(), "restart failed") {
+		t.Fatalf("expected playback restart failure log, got %q", logs.String())
 	}
 }
 
