@@ -723,6 +723,7 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	t.Cleanup(func() { SetDBusConnectionFactory(originalFactory) })
 
 	// Set internal sync states for testing
+	resetPlaylistActivationForTest(t)
 	setVideoSyncRunning(true)
 	t.Cleanup(func() { setVideoSyncRunning(false) })
 
@@ -756,6 +757,12 @@ func TestHandleServiceStatusReturnsStatuses(t *testing.T) {
 	}
 	if resp.Data.VideoUploadServiceStatus != true {
 		t.Fatalf("expected video sync to be running, got %v", resp.Data.VideoUploadServiceStatus)
+	}
+	if resp.Data.PlaylistActivation.State != "idle" {
+		t.Fatalf("expected idle playlist activation, got %q", resp.Data.PlaylistActivation.State)
+	}
+	if resp.Data.PlaylistActivation.Phase != "idle" {
+		t.Fatalf("expected idle playlist activation phase, got %q", resp.Data.PlaylistActivation.Phase)
 	}
 }
 

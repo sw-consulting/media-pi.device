@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -97,7 +98,7 @@ var (
 	syncReloadChan chan struct{}
 
 	// scheduledSyncCallback is called after a successful scheduled sync
-	scheduledSyncCallback     func()
+	scheduledSyncCallback     func() error
 	scheduledSyncCallbackLock sync.RWMutex
 
 	// cronScheduler manages scheduled sync operations
@@ -109,11 +110,25 @@ var (
 	videoSyncRunningLock    sync.RWMutex
 	playlistSyncRunning     bool
 	playlistSyncRunningLock sync.RWMutex
+	playlistActivation      = PlaylistActivationStatus{State: "idle", Phase: "idle"}
+	playlistActivationID    uint64
+	playlistActivationLock  sync.RWMutex
 
 	playlistPhotoCaptureLock   sync.Mutex
 	playlistPhotoCaptureCancel context.CancelFunc
 	scheduledPhotoCaptureLock  sync.Mutex
 )
+
+// PlaylistActivationStatus describes the full manual or scheduled playlist
+// activation flow: playlist sync followed by play.video.service restart.
+type PlaylistActivationStatus struct {
+	State      string     `json:"state"`
+	Phase      string     `json:"phase"`
+	Trigger    string     `json:"trigger,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Error      string     `json:"error,omitempty"`
+}
 
 func init() {
 	syncContext, syncCancel = context.WithCancel(context.Background())
@@ -139,6 +154,54 @@ func IsPlaylistSyncRunning() bool {
 	playlistSyncRunningLock.RLock()
 	defer playlistSyncRunningLock.RUnlock()
 	return playlistSyncRunning
+}
+
+func getPlaylistActivationStatus() PlaylistActivationStatus {
+	playlistActivationLock.RLock()
+	defer playlistActivationLock.RUnlock()
+	return playlistActivation
+}
+
+func startPlaylistActivation(trigger string) uint64 {
+	now := time.Now()
+	playlistActivationLock.Lock()
+	playlistActivationID++
+	playlistActivation = PlaylistActivationStatus{
+		State:     "running",
+		Phase:     "playlistSync",
+		Trigger:   trigger,
+		StartedAt: &now,
+	}
+	operationID := playlistActivationID
+	playlistActivationLock.Unlock()
+	return operationID
+}
+
+func setPlaylistActivationPhase(operationID uint64, phase string) {
+	playlistActivationLock.Lock()
+	if operationID != playlistActivationID {
+		playlistActivationLock.Unlock()
+		return
+	}
+	playlistActivation.Phase = phase
+	playlistActivationLock.Unlock()
+}
+
+func finishPlaylistActivation(operationID uint64, state string, err error) {
+	now := time.Now()
+	playlistActivationLock.Lock()
+	if operationID != playlistActivationID {
+		playlistActivationLock.Unlock()
+		return
+	}
+	playlistActivation.State = state
+	playlistActivation.FinishedAt = &now
+	if err != nil {
+		playlistActivation.Error = err.Error()
+	} else {
+		playlistActivation.Error = ""
+	}
+	playlistActivationLock.Unlock()
 }
 
 // setVideoSyncRunning sets the video sync running state.
@@ -543,10 +606,10 @@ func TriggerSync(callback func()) error {
 	return nil
 }
 
-// TriggerPlaylistSync triggers playlist download and service restart.
-// This downloads only the playlist file (not video files) and restarts the play service.
+// TriggerPlaylistSync triggers playlist download and optional service restart.
+// This downloads only the playlist file (not video files).
 // Returns an error if prerequisites are not met (e.g., missing configuration).
-func TriggerPlaylistSync(callback func()) error {
+func TriggerPlaylistSync(trigger string, callback func() error) error {
 	// Validate prerequisites before spawning async task
 	config := GetCurrentConfig()
 	if config.CoreAPIBase == "" {
@@ -575,12 +638,26 @@ func TriggerPlaylistSync(callback func()) error {
 
 	// Perform playlist sync in background
 	go func() {
+		operationID := startPlaylistActivation(trigger)
 		setPlaylistSyncRunning(true)
 		err := PerformPlaylistSync(ctx)
 		setPlaylistSyncRunning(false)
-		if err == nil && callback != nil {
-			callback()
+		if err != nil {
+			state := "failed"
+			if errors.Is(err, context.Canceled) {
+				state = "canceled"
+			}
+			finishPlaylistActivation(operationID, state, err)
+			return
 		}
+		if callback != nil {
+			setPlaylistActivationPhase(operationID, "playbackRestart")
+			if err := callback(); err != nil {
+				finishPlaylistActivation(operationID, "failed", err)
+				return
+			}
+		}
+		finishPlaylistActivation(operationID, "succeeded", nil)
 	}()
 
 	return nil
@@ -727,7 +804,7 @@ func schedulerLoop() {
 
 				// Route through shared sync trigger to serialize with manual sync operations.
 				callback := getScheduledSyncCallback()
-				if err := TriggerPlaylistSync(callback); err != nil {
+				if err := TriggerPlaylistSync("scheduled", callback); err != nil {
 					log.Printf("Failed to trigger scheduled playlist sync: %v", err)
 				}
 			})
@@ -1066,14 +1143,14 @@ func uniqueOutputPath(path string) string {
 }
 
 // SetScheduledSyncCallback sets the callback to be called after successful scheduled syncs.
-func SetScheduledSyncCallback(callback func()) {
+func SetScheduledSyncCallback(callback func() error) {
 	scheduledSyncCallbackLock.Lock()
 	defer scheduledSyncCallbackLock.Unlock()
 	scheduledSyncCallback = callback
 }
 
 // getScheduledSyncCallback returns the current scheduled sync callback.
-func getScheduledSyncCallback() func() {
+func getScheduledSyncCallback() func() error {
 	scheduledSyncCallbackLock.RLock()
 	defer scheduledSyncCallbackLock.RUnlock()
 	return scheduledSyncCallback

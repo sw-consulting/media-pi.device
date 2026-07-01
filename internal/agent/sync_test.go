@@ -682,6 +682,7 @@ func TestPerformPlaylistSync(t *testing.T) {
 
 func TestTriggerPlaylistSyncMarksStoppedBeforeCallback(t *testing.T) {
 	tmpDir := t.TempDir()
+	resetPlaylistActivationForTest(t)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/devicesync/playlist" {
@@ -719,8 +720,9 @@ func TestTriggerPlaylistSyncMarksStoppedBeforeCallback(t *testing.T) {
 	})
 
 	callbackRunningState := make(chan bool, 1)
-	if err := TriggerPlaylistSync(func() {
+	if err := TriggerPlaylistSync("manual", func() error {
 		callbackRunningState <- IsPlaylistSyncRunning()
+		return nil
 	}); err != nil {
 		t.Fatalf("TriggerPlaylistSync() error = %v", err)
 	}
@@ -736,6 +738,100 @@ func TestTriggerPlaylistSyncMarksStoppedBeforeCallback(t *testing.T) {
 
 	if IsPlaylistSyncRunning() {
 		t.Fatalf("expected playlist sync to remain stopped after callback")
+	}
+
+	status := waitForPlaylistActivationState(t, "succeeded")
+	if status.Trigger != "manual" {
+		t.Fatalf("expected manual trigger, got %q", status.Trigger)
+	}
+	if status.Phase != "playbackRestart" {
+		t.Fatalf("expected playbackRestart phase, got %q", status.Phase)
+	}
+	if status.Error != "" {
+		t.Fatalf("expected empty activation error, got %q", status.Error)
+	}
+}
+
+func TestTriggerPlaylistSyncReportsPlaybackRestartFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	resetPlaylistActivationForTest(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("test playlist"))
+	}))
+	defer server.Close()
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{
+		CoreAPIBase: server.URL,
+		ServerKey:   "test-key",
+		Playlist: PlaylistConfig{
+			Destination: tmpDir,
+		},
+	}
+	configMutex.Unlock()
+
+	t.Cleanup(func() {
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+
+		syncLock.Lock()
+		if syncCancel != nil {
+			syncCancel()
+		}
+		syncContext, syncCancel = context.WithCancel(context.Background())
+		syncLock.Unlock()
+	})
+
+	if err := TriggerPlaylistSync("scheduled", func() error {
+		return errors.New("restart failed")
+	}); err != nil {
+		t.Fatalf("TriggerPlaylistSync() error = %v", err)
+	}
+
+	status := waitForPlaylistActivationState(t, "failed")
+	if status.Trigger != "scheduled" {
+		t.Fatalf("expected scheduled trigger, got %q", status.Trigger)
+	}
+	if status.Phase != "playbackRestart" {
+		t.Fatalf("expected playbackRestart phase, got %q", status.Phase)
+	}
+	if status.Error != "restart failed" {
+		t.Fatalf("expected restart failure error, got %q", status.Error)
+	}
+}
+
+func resetPlaylistActivationForTest(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		playlistActivationLock.Lock()
+		playlistActivationID++
+		playlistActivation = PlaylistActivationStatus{State: "idle", Phase: "idle"}
+		playlistActivationLock.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+func waitForPlaylistActivationState(t *testing.T, state string) PlaylistActivationStatus {
+	t.Helper()
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		status := getPlaylistActivationStatus()
+		if status.State == state {
+			return status
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for playlist activation state %q, last status: %+v", state, status)
+		case <-ticker.C:
+		}
 	}
 }
 
