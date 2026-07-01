@@ -218,6 +218,18 @@ func setPlaylistSyncRunning(running bool) {
 	playlistSyncRunningLock.Unlock()
 }
 
+func startPlaylistSyncRunning() func() {
+	setPlaylistSyncRunning(true)
+	running := true
+	return func() {
+		if !running {
+			return
+		}
+		setPlaylistSyncRunning(false)
+		running = false
+	}
+}
+
 // setSyncStatus updates the sync status in memory and optionally persists to file.
 func setSyncStatus(status SyncStatus) {
 	syncStatusLock.Lock()
@@ -639,9 +651,11 @@ func TriggerPlaylistSync(trigger string, callback func() error) error {
 	// Perform playlist sync in background
 	go func() {
 		operationID := startPlaylistActivation(trigger)
-		setPlaylistSyncRunning(true)
+		stopPlaylistSyncRunning := startPlaylistSyncRunning()
+		defer stopPlaylistSyncRunning()
+
 		err := PerformPlaylistSync(ctx)
-		setPlaylistSyncRunning(false)
+		stopPlaylistSyncRunning()
 		if err != nil {
 			state := "failed"
 			if errors.Is(err, context.Canceled) {

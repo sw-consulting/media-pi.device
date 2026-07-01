@@ -752,6 +752,37 @@ func TestTriggerPlaylistSyncMarksStoppedBeforeCallback(t *testing.T) {
 	}
 }
 
+func TestStartPlaylistSyncRunningCleanupRunsAfterPanic(t *testing.T) {
+	setPlaylistSyncRunning(false)
+	t.Cleanup(func() {
+		setPlaylistSyncRunning(false)
+	})
+
+	stopPlaylistSyncRunning := startPlaylistSyncRunning()
+	if !IsPlaylistSyncRunning() {
+		t.Fatalf("expected playlist sync to be marked running")
+	}
+
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatalf("expected panic")
+			}
+		}()
+		defer stopPlaylistSyncRunning()
+		panic("playlist sync panic")
+	}()
+
+	if IsPlaylistSyncRunning() {
+		t.Fatalf("expected playlist sync running flag to be cleared after panic")
+	}
+
+	stopPlaylistSyncRunning()
+	if IsPlaylistSyncRunning() {
+		t.Fatalf("expected playlist sync running cleanup to be idempotent")
+	}
+}
+
 func TestTriggerPlaylistSyncReportsPlaybackRestartFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	resetPlaylistActivationForTest(t)
