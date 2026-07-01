@@ -88,14 +88,7 @@ func main() {
 
 	// Set callback to restart play.video service after scheduled playlist syncs
 	agent.SetScheduledSyncCallback(func() error {
-		log.Println("Scheduled sync completed, restarting play.video.service")
-		// Use D-Bus to restart the service with proper result checking.
-		if err := agent.RestartVideoPlayService(); err != nil {
-			log.Printf("Warning: Failed to restart play.video.service after scheduled sync: %v", err)
-			return err
-		}
-		log.Println("Scheduled sync completed, restarted play.video.service")
-		return nil
+		return agent.RestartVideoPlayServiceWithLogs("scheduled playlist sync")
 	})
 
 	mux := http.NewServeMux()
