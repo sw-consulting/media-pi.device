@@ -688,6 +688,23 @@ func HandleConfigurationUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	const playlistBaseDir = "/var/media-pi"
+	baseAbs, err := filepath.Abs(playlistBaseDir)
+	if err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{OK: false, ErrMsg: "Не удалось проверить путь destination"})
+		return
+	}
+	destAbs, err := filepath.Abs(cleanDestination)
+	if err != nil {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+		return
+	}
+	basePrefix := baseAbs + string(os.PathSeparator)
+	if destAbs != baseAbs && !strings.HasPrefix(destAbs, basePrefix) {
+		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Недопустимый путь destination"})
+		return
+	}
+	cleanDestination = destAbs
 
 	if hasInvalidTimes(req.Schedule.Playlist, req.Schedule.Video) {
 		JSONResponse(w, http.StatusBadRequest, APIResponse{OK: false, ErrMsg: "Неверный формат времени. Используйте HH:MM"})
