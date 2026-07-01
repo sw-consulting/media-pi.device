@@ -767,8 +767,10 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("Reloading systemd daemon configuration")
 	conn, err := getDBusConnection(context.Background())
 	if err != nil {
+		log.Printf("Failed to reload systemd daemon configuration: connect to D-Bus: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось подключиться к D-Bus: %v", err),
@@ -782,9 +784,33 @@ func HandleSystemReload(w http.ResponseWriter, r *http.Request) {
 
 	err = conn.ReloadContext(ctx)
 	if err != nil {
+		log.Printf("Failed to reload systemd daemon configuration: %v", err)
 		JSONResponse(w, http.StatusInternalServerError, APIResponse{
 			OK:     false,
 			ErrMsg: fmt.Sprintf("Не удалось перезагрузить конфигурацию: %v", err),
+		})
+		return
+	}
+	log.Println("Reloaded systemd daemon configuration")
+
+	now := playbackTimeNow()
+	if isWithinConfiguredRestInterval(now, GetCurrentConfig().Schedule.Rest) {
+		log.Printf("Skipping play.video.service restart after systemd daemon reload at %s because configuration is within a rest interval", now.Format("15:04"))
+		JSONResponse(w, http.StatusOK, APIResponse{
+			OK: true,
+			Data: MenuActionResponse{
+				Action:  "system-reload",
+				Result:  "success",
+				Message: "Изменения применены",
+			},
+		})
+		return
+	}
+
+	if err := RestartVideoPlayServiceWithLogs("systemd daemon reload"); err != nil {
+		JSONResponse(w, http.StatusInternalServerError, APIResponse{
+			OK:     false,
+			ErrMsg: fmt.Sprintf("Не удалось перезапустить воспроизведение: %v", err),
 		})
 		return
 	}
@@ -882,13 +908,7 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger playlist-only sync with callback to restart play.video.service
 	err := TriggerPlaylistSync("manual", func() error {
-		log.Println("Playlist sync completed, restarting play.video.service")
-		if err := RestartVideoPlayService(); err != nil {
-			log.Printf("Warning: Failed to restart play.video.service: %v", err)
-			return err
-		}
-		log.Println("Playlist sync completed, restarted play.video.service")
-		return nil
+		return RestartVideoPlayServiceWithLogs("playlist sync")
 	})
 
 	if err != nil {
@@ -1042,6 +1062,16 @@ func RestartVideoPlayService() error {
 		return fmt.Errorf("restart failed with result: %s", result)
 	}
 	schedulePlaylistPhotoCaptures()
+	return nil
+}
+
+func RestartVideoPlayServiceWithLogs(reason string) error {
+	log.Printf("Restarting play.video.service after %s", reason)
+	if err := RestartVideoPlayService(); err != nil {
+		log.Printf("Failed to restart play.video.service after %s: %v", reason, err)
+		return err
+	}
+	log.Printf("Restarted play.video.service after %s", reason)
 	return nil
 }
 

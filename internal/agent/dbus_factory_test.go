@@ -11,10 +11,11 @@ import (
 	"github.com/coreos/go-systemd/v22/dbus"
 )
 
-// fakeConn implements agent.DBusConnection for tests. Only ReloadContext is
-// observed; other methods return zero values.
+// fakeConn implements agent.DBusConnection for tests. ReloadContext and
+// RestartUnitContext are observed; other methods return zero values.
 type fakeConn struct {
-	calledReload bool
+	calledReload  bool
+	calledRestart bool
 }
 
 func (f *fakeConn) Close()                                  {}
@@ -26,7 +27,11 @@ func (f *fakeConn) StopUnitContext(ctx context.Context, name, mode string, ch ch
 	return 0, nil
 }
 func (f *fakeConn) RestartUnitContext(ctx context.Context, name, mode string, ch chan<- string) (int, error) {
-	return 0, nil
+	f.calledRestart = true
+	if ch != nil {
+		ch <- "done"
+	}
+	return 1, nil
 }
 func (f *fakeConn) EnableUnitFilesContext(ctx context.Context, files []string, runtime, force bool) (bool, []dbus.EnableUnitFileChange, error) {
 	return true, nil, nil
@@ -43,12 +48,22 @@ func (f *fakeConn) PowerOffContext(ctx context.Context) error { return nil }
 func TestHandleSystemReload_UsesInjectedDBusFactory(t *testing.T) {
 	fake := &fakeConn{}
 
-	// Inject factory that returns our fake connection
 	SetDBusConnectionFactory(func(ctx context.Context) (DBusConnection, error) {
 		return fake, nil
 	})
-	// restore default factory after test
-	defer SetDBusConnectionFactory(nil)
+
+	configMutex.Lock()
+	originalConfig := currentConfig
+	currentConfig = &Config{}
+	configMutex.Unlock()
+
+	t.Cleanup(func() {
+		SetDBusConnectionFactory(nil)
+		configMutex.Lock()
+		currentConfig = originalConfig
+		configMutex.Unlock()
+		cancelScheduledPlaylistPhotoCaptures()
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/menu/system/reload", nil)
 	rr := httptest.NewRecorder()
@@ -61,5 +76,8 @@ func TestHandleSystemReload_UsesInjectedDBusFactory(t *testing.T) {
 
 	if !fake.calledReload {
 		t.Fatalf("expected ReloadContext to be called on injected DBus connection")
+	}
+	if !fake.calledRestart {
+		t.Fatalf("expected RestartUnitContext to be called on injected DBus connection")
 	}
 }
