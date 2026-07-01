@@ -233,9 +233,10 @@ type configurationUpdateRequest struct {
 // ServiceStatusResponse describes the service status returned by the
 // service-status endpoint.
 type ServiceStatusResponse struct {
-	PlaybackServiceStatus       bool `json:"playbackServiceStatus"`
-	PlaylistUploadServiceStatus bool `json:"playlistUploadServiceStatus"`
-	VideoUploadServiceStatus    bool `json:"videoUploadServiceStatus"`
+	PlaybackServiceStatus       bool                     `json:"playbackServiceStatus"`
+	PlaylistUploadServiceStatus bool                     `json:"playlistUploadServiceStatus"`
+	VideoUploadServiceStatus    bool                     `json:"videoUploadServiceStatus"`
+	PlaylistActivation          PlaylistActivationStatus `json:"playlistActivation"`
 }
 
 // HandleMenuList returns the list of available menu actions.
@@ -430,6 +431,7 @@ func getServiceStatus(parent context.Context) (ServiceStatusResponse, error) {
 		PlaybackServiceStatus:       isUnitActive(ctx, conn, "play.video.service"),
 		PlaylistUploadServiceStatus: IsPlaylistSyncRunning(),
 		VideoUploadServiceStatus:    IsVideoSyncRunning(),
+		PlaylistActivation:          getPlaylistActivationStatus(),
 	}, nil
 }
 
@@ -879,13 +881,14 @@ func HandlePlaylistStartUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger playlist-only sync with callback to restart play.video.service
-	err := TriggerPlaylistSync(func() {
+	err := TriggerPlaylistSync("manual", func() error {
 		log.Println("Playlist sync completed, restarting play.video.service")
 		if err := RestartVideoPlayService(); err != nil {
 			log.Printf("Warning: Failed to restart play.video.service: %v", err)
-			return
+			return err
 		}
 		log.Println("Playlist sync completed, restarted play.video.service")
+		return nil
 	})
 
 	if err != nil {
