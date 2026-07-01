@@ -120,7 +120,7 @@ var (
 )
 
 // PlaylistActivationStatus describes the full manual or scheduled playlist
-// activation flow: playlist sync followed by play.video.service restart.
+// activation flow: playlist sync and (optionally) play.video.service restart.
 type PlaylistActivationStatus struct {
 	State      string     `json:"state"`
 	Phase      string     `json:"phase"`
