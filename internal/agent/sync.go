@@ -576,8 +576,9 @@ func TriggerPlaylistSync(callback func()) error {
 	// Perform playlist sync in background
 	go func() {
 		setPlaylistSyncRunning(true)
-		defer setPlaylistSyncRunning(false)
-		if err := PerformPlaylistSync(ctx); err == nil && callback != nil {
+		err := PerformPlaylistSync(ctx)
+		setPlaylistSyncRunning(false)
+		if err == nil && callback != nil {
 			callback()
 		}
 	}()

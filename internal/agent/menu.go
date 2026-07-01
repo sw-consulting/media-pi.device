@@ -1018,7 +1018,7 @@ func HandleTakeScreenshot(w http.ResponseWriter, r *http.Request) {
 // RestartVideoPlayService restarts the play.video.service via D-Bus.
 // This function waits for the restart operation to complete and verifies the result.
 func RestartVideoPlayService() error {
-	connCtx, cancel := context.WithTimeout(context.Background(), dbusOperationTimeout)
+	connCtx, cancel := context.WithTimeout(context.Background(), playbackServiceOperationTimeout+playbackServiceActiveCheckTimeout)
 	defer cancel()
 
 	conn, err := getDBusConnection(connCtx)
